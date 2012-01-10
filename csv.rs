@@ -9,7 +9,7 @@ type reader = obj {
 
 fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> reader {
     tag state {
-        start;
+        start(bool);
         field([char]);
         escapedfield([char]);
         inquote([char]);
@@ -31,14 +31,17 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                     st.offset += 1u;
                     /* bug: trailing commas don't generate a field */
                     alt st.state {
-                        start() {
+                        start(after_delim) {
                             //io::println(#fmt("start - %c", c));
                             if c == st.quote {
                                 st.state = escapedfield([]);
                             } else if c == '\n' {
+                                if after_delim {
+                                    row += [""];
+                                }
                                 ret true;
                             } else if c == st.delim {
-                                st.state = start;
+                                st.state = start(true);
                                 row += [""];
                             } else {
                                 st.state = field([c]);
@@ -50,7 +53,7 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                                 row += [str::from_chars(x)];
                                 ret true;
                             } else if c == st.delim {
-                                st.state = start;
+                                st.state = start(true);
                                 row += [str::from_chars(x)];
                             } else {
                                 st.state = field(x + [c]);
@@ -61,7 +64,7 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                             if c == st.quote {
                                 st.state = inquote(x);
                             } else if c == st.delim {
-                                st.state = start;
+                                st.state = start(true);
                                 row += [str::from_chars(x)];
                             } else {
                                 st.state = escapedfield(x + [c]);
@@ -75,7 +78,7 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                             } else if c == st.quote {
                                 st.state = escapedfield(x + [st.quote]);
                             } else if c == st.delim {
-                                st.state = start;
+                                st.state = start(true);
                                 row += [str::from_chars(x)];
                             }
                             // swallow odd chars, eg. space between field and "
@@ -86,7 +89,7 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
             }
 
             let row: [str] = [];
-            st.state = start;
+            st.state = start(false);
             while true {
                 if st.offset >= vec::len(st.buf) {
                     st.offset = 0u;
@@ -104,7 +107,7 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
         }
     }
 
-    let st = { f: f, delim: delim, quote: quote, has_header: has_header, mutable buf: [], mutable offset: 0u, mutable state: start };
+    let st = { f: f, delim: delim, quote: quote, has_header: has_header, mutable buf: [], mutable offset: 0u, mutable state: start(false) };
     let r = reader(st);
     ret r;
 }
