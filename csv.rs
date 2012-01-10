@@ -34,9 +34,9 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                         start() {
                             if c == st.quote {
                                 st.state = escapedfield([]);
-                            } if c == '\n' {
+                            } else if c == '\n' {
                                 ret true;
-                            } if c == st.delim {
+                            } else if c == st.delim {
                                 st.state = start;
                                 row += [""];
                             } else {
@@ -57,8 +57,11 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                         escapedfield(x) {
                             if c == st.quote {
                                 st.state = inquote(x);
+                            } else if c == st.delim {
+                                st.state = start;
+                                row += [str::from_chars(x)];
                             } else {
-                                st.state = field(x + [c]);
+                                st.state = escapedfield(x + [c]);
                             }
                         }
                         inquote(x) {
@@ -70,9 +73,15 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                         }
                         escapeend(x) {
                             // swallow odd chars, eg. space between field and "
-                            if c == st.delim {
+                            io::println(#fmt("escapeend - %c", c));
+                            if (c == st.delim) {
                                 st.state = start;
                                 row += [str::from_chars(x)];
+                            } else if (c == '\n') {
+                                row += [str::from_chars(x)];
+                                ret true;
+                            } else {
+                                st.state = start;
                             }
                         }
                     }
