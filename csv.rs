@@ -124,8 +124,9 @@ fn main(args : [str])
         if result::failure(res) {
             break;
         }
-        io::println("---------------");
-        for field in result::get(res) {
+        let fields = result::get(res);
+        io::println(#fmt("---- %u fields", vec::len(fields)));
+        for field in fields {
             io::println("FIELD: " + field);
         }
     }
