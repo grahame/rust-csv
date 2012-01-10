@@ -13,7 +13,6 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
         field([char]);
         escapedfield([char]);
         inquote([char]);
-        escapeend([char]);
     };
     type readerstate = {
         f: std::io::reader,
@@ -30,8 +29,10 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                 while st.offset < vec::len(st.buf) {
                     let c : char = st.buf[st.offset];
                     st.offset += 1u;
+                    /* bug: trailing commas don't generate a field */
                     alt st.state {
                         start() {
+                            //io::println(#fmt("start - %c", c));
                             if c == st.quote {
                                 st.state = escapedfield([]);
                             } else if c == '\n' {
@@ -44,6 +45,7 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                             }
                         }
                         field(x) {
+                            //io::println(#fmt("field - %c", c));
                             if c == '\n' {
                                 row += [str::from_chars(x)];
                                 ret true;
@@ -55,6 +57,7 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                             }
                         }
                         escapedfield(x) {
+                            //io::println(#fmt("escapefield - %c", c));
                             if c == st.quote {
                                 st.state = inquote(x);
                             } else if c == st.delim {
@@ -65,24 +68,17 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                             }
                         }
                         inquote(x) {
-                            if c == st.quote {
-                                st.state = escapedfield(x + [st.quote]);
-                            } else {
-                                st.state = escapeend(x);
-                            }
-                        }
-                        escapeend(x) {
-                            // swallow odd chars, eg. space between field and "
-                            io::println(#fmt("escapeend - %c", c));
-                            if (c == st.delim) {
-                                st.state = start;
-                                row += [str::from_chars(x)];
-                            } else if (c == '\n') {
+                            //io::println(#fmt("inquote - %c", c));
+                            if c == '\n' {
                                 row += [str::from_chars(x)];
                                 ret true;
-                            } else {
+                            } else if c == st.quote {
+                                st.state = escapedfield(x + [st.quote]);
+                            } else if c == st.delim {
                                 st.state = start;
+                                row += [str::from_chars(x)];
                             }
+                            // swallow odd chars, eg. space between field and "
                         }
                     }
                 }
