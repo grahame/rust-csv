@@ -29,7 +29,6 @@ fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> 
                 while st.offset < vec::len(st.buf) {
                     let c : char = st.buf[st.offset];
                     st.offset += 1u;
-                    /* bug: trailing commas don't generate a field */
                     alt st.state {
                         start(after_delim) {
                             //io::println(#fmt("start - %c", c));
