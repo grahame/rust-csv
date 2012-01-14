@@ -1,114 +1,146 @@
 
 use std;
 import std::io;
+import std::io::{writer_util, reader_util};
 import result;
 
-type reader = obj {
-    fn read_row() -> result::t<[str], str>;
+tag state {
+    start(bool);
+    field(uint, uint);
+    escapedfield(uint, uint);
+    inquote(uint, uint);
+}
+
+type rowreader = {
+    delim: char,
+    quote: char,
+    f : io::reader,
+    mutable offset : uint,
+    mutable buffers : [@[char]],
+    mutable state : state
 };
 
-fn mk_reader(f: std::io::reader, delim: char, quote: char, has_header: bool) -> reader {
-    tag state {
-        start(bool);
-        field([char]);
-        escapedfield([char]);
-        inquote([char]);
-    };
-    type readerstate = {
-        f: std::io::reader,
-        delim: char,
-        quote: char,
-        has_header: bool,
-        mutable buf : [char],
-        mutable offset : uint,
-        mutable state : state,
-    };
-    obj reader(st: readerstate) {
-        fn read_row() -> result::t<[str], str> {
-            fn row_from_buf(st: readerstate, &row: [str]) -> bool {
-                while st.offset < vec::len(st.buf) {
-                    let c : char = st.buf[st.offset];
-                    st.offset += 1u;
-                    alt st.state {
-                        start(after_delim) {
-                            //io::println(#fmt("start - %c", c));
-                            if c == st.quote {
-                                st.state = escapedfield([]);
-                            } else if c == '\n' {
-                                if after_delim {
-                                    row += [""];
-                                }
-                                ret true;
-                            } else if c == st.delim {
-                                st.state = start(true);
-                                row += [""];
-                            } else {
-                                st.state = field([c]);
-                            }
-                        }
-                        field(x) {
-                            //io::println(#fmt("field - %c", c));
-                            if c == '\n' {
-                                row += [str::from_chars(x)];
-                                ret true;
-                            } else if c == st.delim {
-                                st.state = start(true);
-                                row += [str::from_chars(x)];
-                            } else {
-                                st.state = field(x + [c]);
-                            }
-                        }
-                        escapedfield(x) {
-                            //io::println(#fmt("escapefield - %c", c));
-                            if c == st.quote {
-                                st.state = inquote(x);
-                            } else if c == st.delim {
-                                st.state = start(true);
-                                row += [str::from_chars(x)];
-                            } else {
-                                st.state = escapedfield(x + [c]);
-                            }
-                        }
-                        inquote(x) {
-                            //io::println(#fmt("inquote - %c", c));
-                            if c == '\n' {
-                                row += [str::from_chars(x)];
-                                ret true;
-                            } else if c == st.quote {
-                                st.state = escapedfield(x + [st.quote]);
-                            } else if c == st.delim {
-                                st.state = start(true);
-                                row += [str::from_chars(x)];
-                            }
-                            // swallow odd chars, eg. space between field and "
-                        }
-                    }
-                }
-                ret false;
-            }
+type row = {
+    buffers : [@[char]],
+    mutable fields : [ field ]
+};
 
-            let row: [str] = [];
-            st.state = start(false);
-            while true {
-                if st.offset >= vec::len(st.buf) {
-                    st.offset = 0u;
-                    st.buf = st.f.read_chars(1024u);
-                    /* should probably use a result */
-                    if vec::len(st.buf) == 0u {
-                        ret result::err("EOF");
-                    }
-                }
-                if (row_from_buf(st, row)) {
-                    ret result::ok(row);
-                }
-            }
-            ret result::err("EOF");
-        }
-    }
+enum field {
+    bufferfield([@[char]], uint, uint);
+    emptyfield();
+}
 
-    let st = { f: f, delim: delim, quote: quote, has_header: has_header, mutable buf: [], mutable offset: 0u, mutable state: start(false) };
-    let r = reader(st);
+iface rowiter {
+    fn readrow() -> result::t<row, str>;
+}
+
+iface rowaccess {
+    fn len() -> uint;
+    fn getchars(uint) -> @[char];
+    fn getstr(uint) -> str;
+}
+
+fn new_reader(+f: io::reader, +delim: char, +quote: char) -> rowreader {
+    let r : rowreader = {
+        delim: delim,
+        quote: quote,
+        f: f,
+        mutable offset : 0u,
+        mutable buffers : [],
+        mutable state : start(false)
+    };
     ret r;
+}
+
+impl csv of rowiter for rowreader {
+    fn readrow() -> result::t<row, str> {
+        fn row_from_buf(self: rowreader, &r: row) -> bool {
+            fn new_bufferfield(self: rowreader, sb: uint, so: uint, eo: uint) -> field {
+                let bufs : [@[char]] = vec::slice(self.buffers, sb, vec::len(self.buffers));
+                ret bufferfield(bufs, so, eo);
+            }
+            let cbuffer = vec::len(self.buffers) - 1u;
+            let buf: @[char] = self.buffers[cbuffer];
+            while self.offset < vec::len(*buf) {
+                let coffset = self.offset;
+                let c : char = buf[coffset];
+                self.offset += 1u;
+                alt self.state {
+                    start(after_delim) {
+                        //io::println(#fmt("start : after_delim %b", after_delim));
+                        if c == self.quote {
+                            self.state = escapedfield(cbuffer, coffset);
+                        } else if c == '\n' {
+                            if after_delim {
+                                r.fields += [emptyfield];
+                            }
+                            ret true;
+                        } else if c == self.delim {
+                            self.state = start(true);
+                            r.fields += [emptyfield];
+                        } else {
+                            self.state = field(cbuffer, coffset);
+                        }
+                    }
+                    field(b,o) {
+                        //io::println(#fmt("field : %u %u", b, o));
+                        if c == '\n' {
+                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                            ret true;
+                        } else if c == self.delim {
+                            self.state = start(true);
+                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                        }
+                    }
+                    escapedfield(b, o) {
+                        //io::println(#fmt("escapedfield : %u %u", b, o));
+                        if c == self.quote {
+                            self.state = inquote(b, o);
+                        } else if c == self.delim {
+                            self.state = start(true);
+                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                        }
+                    }
+                    inquote(b, o) {
+                        //io::println(#fmt("inquote : %u %u", b, o));
+                        if c == '\n' {
+                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                            ret true;
+                        } else if c == self.quote {
+                            // hmm what to do 
+                            // self.state = escapedfield(x + [self.quote]);
+                        } else if c == self.delim {
+                            self.state = start(true);
+                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                        }
+                        // swallow odd chars, eg. space between field and "
+                    }
+                }
+            }
+            ret false;
+        }
+
+        self.state = start(false);
+        let do_read = vec::len(self.buffers) == 0u;
+        while true {
+            if do_read {
+                let data: @[char] = @self.f.read_chars(1024u);
+                //io::println(#fmt("len %u '%s'", vec::len(*data), str::from_chars(*data)));
+                if vec::len(*data) == 0u {
+                    ret result::err("EOF");
+                }
+                self.buffers += [data];
+                self.offset = 0u;
+            }
+
+            let r: row = { buffers: [], mutable fields: [] };
+            if row_from_buf(self, r) {
+                ret result::ok(r);
+            }
+            do_read = true;
+        }
+        ret result::err("unreachable");
+    }
 }
 
 fn main(args : [str])
@@ -117,17 +149,13 @@ fn main(args : [str])
         ret;
     }
     let f : io::reader = result::get(io::file_reader(args[1]));
-    let r = mk_reader(f, ',', '"', true);
+    let reader = new_reader(f, ',', '"');
     while true {
-        let res = r.read_row();
+        let res = reader.readrow();
         if result::failure(res) {
             break;
         }
-        let fields = result::get(res);
-        io::println(#fmt("---- %u fields", vec::len(fields)));
-        for field in fields {
-            io::println("FIELD: " + field);
-        }
+        io::println("got a row");
     }
 }
 
