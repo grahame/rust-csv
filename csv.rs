@@ -63,8 +63,7 @@ impl of rowaccess for row {
                 let i = 0u;
                 while i < vec::len(buffers) {
                     let from = i == 0u ? so : 0u;
-                    let to = (i == vec::len(buffers) - 1u) ? eo : 0u;
-                    io::println(#fmt("%u %u %u", i, from, to));
+                    let to = (i == vec::len(buffers) - 1u) ? eo : vec::len(*buffers[i]);
                     r += vec::slice(*buffers[i], from, to);
                     i = i + 1u;
                 }
@@ -82,7 +81,7 @@ impl of rowiter for rowreader {
         fn row_from_buf(self: rowreader, &r: row) -> bool {
             fn new_bufferfield(self: rowreader, sb: uint, so: uint, eo: uint) -> field {
                 let bufs : [@[char]] = vec::slice(self.buffers, sb, vec::len(self.buffers));
-                ret bufferfield(bufs, 0u, eo-so);
+                ret bufferfield(bufs, so, eo);
             }
             let cbuffer = vec::len(self.buffers) - 1u;
             let buf: @[char] = self.buffers[cbuffer];
@@ -180,9 +179,13 @@ fn main(args : [str])
         if result::failure(res) {
             break;
         }
-        io::println("got a row");
         let row = result::get(res);
-        io::println(row.getstr(0u));
+        io::println(#fmt("---- ROW %u fields -----", row.len()));
+        let i = 0u;
+        while i < row.len() {
+            io::println(row.getstr(i));
+            i = i + 1u;
+        }
     }
 }
 
