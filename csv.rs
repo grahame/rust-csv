@@ -21,7 +21,7 @@ type rowreader = {
 };
 
 type row = {
-    mutable fields : [ field ]
+    fields : [ field ]
 };
 
 enum field {
@@ -78,7 +78,7 @@ impl of rowaccess for row {
 
 impl of rowiter for rowreader {
     fn readrow() -> result::t<row, str> {
-        fn row_from_buf(self: rowreader, &r: row) -> bool {
+        fn row_from_buf(self: rowreader, &fields: [field]) -> bool {
             fn new_bufferfield(self: rowreader, sb: uint, so: uint, eo: uint) -> field {
                 let bufs : [@[char]] = vec::slice(self.buffers, sb, vec::len(self.buffers));
                 ret bufferfield(bufs, so, eo);
@@ -96,12 +96,12 @@ impl of rowiter for rowreader {
                             self.state = escapedfield(cbuffer, coffset);
                         } else if c == '\n' {
                             if after_delim {
-                                r.fields += [emptyfield];
+                                fields += [emptyfield];
                             }
                             ret true;
                         } else if c == self.delim {
                             self.state = start(true);
-                            r.fields += [emptyfield];
+                            fields += [emptyfield];
                         } else {
                             self.state = field(cbuffer, coffset);
                         }
@@ -109,11 +109,11 @@ impl of rowiter for rowreader {
                     field(b,o) {
                         //io::println(#fmt("field : %u %u", b, o));
                         if c == '\n' {
-                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, b, o, coffset)];
                             ret true;
                         } else if c == self.delim {
                             self.state = start(true);
-                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, b, o, coffset)];
                         }
                     }
                     escapedfield(b, o) {
@@ -122,20 +122,20 @@ impl of rowiter for rowreader {
                             self.state = inquote(b, o);
                         } else if c == self.delim {
                             self.state = start(true);
-                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, b, o, coffset)];
                         }
                     }
                     inquote(b, o) {
                         //io::println(#fmt("inquote : %u %u", b, o));
                         if c == '\n' {
-                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, b, o, coffset)];
                             ret true;
                         } else if c == self.quote {
                             // hmm what to do 
                             // self.state = escapedfield(x + [self.quote]);
                         } else if c == self.delim {
                             self.state = start(true);
-                            r.fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, b, o, coffset)];
                         }
                         // swallow odd chars, eg. space between field and "
                     }
@@ -146,6 +146,7 @@ impl of rowiter for rowreader {
 
         self.state = start(false);
         let do_read = vec::len(self.buffers) == 0u;
+        let fields = [];
         while true {
             if do_read {
                 let data: @[char] = @self.f.read_chars(1024u);
@@ -157,8 +158,12 @@ impl of rowiter for rowreader {
                 self.offset = 0u;
             }
 
-            let r: row = { mutable fields: [] };
-            if row_from_buf(self, r) {
+            if row_from_buf(self, fields) {
+                let r: row = { fields: fields };
+                fields = [];
+                if vec::len(self.buffers) > 1u {
+                    self.buffers = vec::slice(self.buffers, vec::len(self.buffers) - 1u, vec::len(self.buffers));
+                }
                 ret result::ok(r);
             }
             do_read = true;
