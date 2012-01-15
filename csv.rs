@@ -5,9 +5,9 @@ import std::io::{writer_util, reader_util};
 import result;
 
 tag state {
-    start(bool);
-    field(uint, uint);
-    escapedfield(uint, uint);
+    fieldstart(bool);
+    infield(uint, uint);
+    inescapedfield(uint, uint);
     inquote(uint, uint);
 }
 
@@ -46,7 +46,7 @@ fn new_reader(+f: io::reader, +delim: char, +quote: char) -> rowreader {
         f: f,
         mutable offset : 0u,
         mutable buffers : [],
-        mutable state : start(false)
+        mutable state : fieldstart(false)
     };
     ret r;
 }
@@ -80,8 +80,12 @@ impl of rowiter for rowreader {
     fn readrow() -> result::t<row, str> {
         fn row_from_buf(self: rowreader, &fields: [field]) -> bool {
             fn new_bufferfield(self: rowreader, sb: uint, so: uint, eo: uint) -> field {
-                let bufs : [@[char]] = vec::slice(self.buffers, sb, vec::len(self.buffers));
-                ret bufferfield(bufs, so, eo);
+                bufferfield(vec::slice(self.buffers, sb, vec::len(self.buffers)),
+                    so, eo)
+            }
+            fn new_escapedfield(self: rowreader, sb: uint, so: uint, eo: uint) -> field {
+                bufferfield(vec::slice(self.buffers, sb, vec::len(self.buffers)),
+                    so, eo)
             }
             let cbuffer = vec::len(self.buffers) - 1u;
             let buf: @[char] = self.buffers[cbuffer];
@@ -90,38 +94,38 @@ impl of rowiter for rowreader {
                 let c : char = buf[coffset];
                 self.offset += 1u;
                 alt self.state {
-                    start(after_delim) {
-                        //io::println(#fmt("start : after_delim %b", after_delim));
+                    fieldstart(after_delim) {
+                        //io::println(#fmt("fieldstart : after_delim %b", after_delim));
                         if c == self.quote {
-                            self.state = escapedfield(cbuffer, coffset);
+                            self.state = inescapedfield(cbuffer, coffset);
                         } else if c == '\n' {
                             if after_delim {
                                 fields += [emptyfield];
                             }
                             ret true;
                         } else if c == self.delim {
-                            self.state = start(true);
+                            self.state = fieldstart(true);
                             fields += [emptyfield];
                         } else {
-                            self.state = field(cbuffer, coffset);
+                            self.state = infield(cbuffer, coffset);
                         }
                     }
-                    field(b,o) {
+                    infield(b,o) {
                         //io::println(#fmt("field : %u %u", b, o));
                         if c == '\n' {
                             fields += [new_bufferfield(self, b, o, coffset)];
                             ret true;
                         } else if c == self.delim {
-                            self.state = start(true);
+                            self.state = fieldstart(true);
                             fields += [new_bufferfield(self, b, o, coffset)];
                         }
                     }
-                    escapedfield(b, o) {
-                        //io::println(#fmt("escapedfield : %u %u", b, o));
+                    inescapedfield(b, o) {
+                        //io::println(#fmt("inescapedfield : %u %u", b, o));
                         if c == self.quote {
                             self.state = inquote(b, o);
                         } else if c == self.delim {
-                            self.state = start(true);
+                            self.state = fieldstart(true);
                             fields += [new_bufferfield(self, b, o, coffset)];
                         }
                     }
@@ -132,9 +136,9 @@ impl of rowiter for rowreader {
                             ret true;
                         } else if c == self.quote {
                             // hmm what to do 
-                            // self.state = escapedfield(x + [self.quote]);
+                            // self.state = inescapedfield(x + [self.quote]);
                         } else if c == self.delim {
-                            self.state = start(true);
+                            self.state = fieldstart(true);
                             fields += [new_bufferfield(self, b, o, coffset)];
                         }
                         // swallow odd chars, eg. space between field and "
@@ -144,7 +148,7 @@ impl of rowiter for rowreader {
             ret false;
         }
 
-        self.state = start(false);
+        self.state = fieldstart(false);
         let do_read = vec::len(self.buffers) == 0u;
         let fields = [];
         while true {
