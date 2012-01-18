@@ -21,11 +21,18 @@ type rowreader = {
 };
 
 type row = {
-    fields : [ field ]
+    fields : [ fieldtype ]
 };
 
-enum field {
-    bufferfield([@[char]], uint, uint);
+type field = {
+    escaped: bool,
+    buffers: [@[char]],
+    start: uint, // offset into first buffer
+    end: uint // offset into last buffer
+};
+
+enum fieldtype {
+    bufferfield(field);
     emptyfield();
 }
 
@@ -56,18 +63,41 @@ impl of rowaccess for row {
         vec::len(self.fields)
     }
     fn getchars(field: uint) -> [char] {
+        fn extract_field(field: field, &r: [char]) {
+            let i = 0u;
+            while i < vec::len(field.buffers) {
+                let from = i == 0u ? field.start : 0u;
+                let to = (i == vec::len(field.buffers) - 1u) ? 
+                         field.end : vec::len(*field.buffers[i]);
+                r += vec::slice(*field.buffers[i], from, to);
+                i = i + 1u;
+            }
+        }
+        fn unescape(escaped: [char]) -> [char] {
+            io::println("unescape");
+            let r : [char] = [];
+            vec::reserve(r, vec::len(escaped));
+            let in_q = false;
+            for c in escaped { 
+                if in_q { 
+                    assert(c == '"');
+                    in_q = false;
+                } else {
+                    in_q = c == '"';
+                    r += [c];
+                }
+            }
+            ret r;
+        }
         alt self.fields[field] {
             emptyfield() { ret []; }
-            bufferfield(buffers, so, eo) {
-                let r : [char] = [];
-                let i = 0u;
-                while i < vec::len(buffers) {
-                    let from = i == 0u ? so : 0u;
-                    let to = (i == vec::len(buffers) - 1u) ? eo : vec::len(*buffers[i]);
-                    r += vec::slice(*buffers[i], from, to);
-                    i = i + 1u;
+            bufferfield(field) {
+                let buf = [];
+                extract_field(field, buf);
+                if field.escaped {
+                    buf = unescape(buf);
                 }
-                ret r;
+                ret buf;
             }
         };
     }
@@ -78,14 +108,25 @@ impl of rowaccess for row {
 
 impl of rowiter for rowreader {
     fn readrow() -> result::t<row, str> {
-        fn row_from_buf(self: rowreader, &fields: [field]) -> bool {
-            fn new_bufferfield(self: rowreader, sb: uint, so: uint, eo: uint) -> field {
-                bufferfield(vec::slice(self.buffers, sb, vec::len(self.buffers)),
-                    so, eo)
-            }
-            fn new_escapedfield(self: rowreader, sb: uint, so: uint, eo: uint) -> field {
-                bufferfield(vec::slice(self.buffers, sb, vec::len(self.buffers)),
-                    so, eo)
+        fn row_from_buf(self: rowreader, &fields: [fieldtype]) -> bool {
+            fn new_bufferfield(self: rowreader, escaped: bool, sb: uint, so: uint, eo: uint) -> fieldtype {
+                let eb = vec::len(self.buffers);
+                let sb = sb, so = so, eo = eo;
+                if escaped {
+                    so += 1u;
+                    if so >= vec::len(*self.buffers[sb]) {
+                        sb += 1u;
+                        so = vec::len(*self.buffers[sb]) - 1u;
+                    }
+                    if eo > 0u {
+                        eo -= 1u;
+                    } else {
+                        eb -= 1u;
+                        eo = vec::len(*self.buffers[sb]) - 1u;
+                    }
+                }
+                bufferfield({escaped: escaped, buffers: vec::slice(self.buffers, sb, eb), 
+                    start: so, end: eo})
             }
             let cbuffer = vec::len(self.buffers) - 1u;
             let buf: @[char] = self.buffers[cbuffer];
@@ -113,11 +154,11 @@ impl of rowiter for rowreader {
                     infield(b,o) {
                         //io::println(#fmt("field : %u %u", b, o));
                         if c == '\n' {
-                            fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, false, b, o, coffset)];
                             ret true;
                         } else if c == self.delim {
                             self.state = fieldstart(true);
-                            fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, false, b, o, coffset)];
                         }
                     }
                     inescapedfield(b, o) {
@@ -126,20 +167,19 @@ impl of rowiter for rowreader {
                             self.state = inquote(b, o);
                         } else if c == self.delim {
                             self.state = fieldstart(true);
-                            fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, true, b, o, coffset)];
                         }
                     }
                     inquote(b, o) {
                         //io::println(#fmt("inquote : %u %u", b, o));
                         if c == '\n' {
-                            fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, true, b, o, coffset)];
                             ret true;
                         } else if c == self.quote {
-                            // hmm what to do 
-                            // self.state = inescapedfield(x + [self.quote]);
+                            self.state = inescapedfield(b, o);
                         } else if c == self.delim {
                             self.state = fieldstart(true);
-                            fields += [new_bufferfield(self, b, o, coffset)];
+                            fields += [new_bufferfield(self, true, b, o, coffset)];
                         }
                         // swallow odd chars, eg. space between field and "
                     }
@@ -153,7 +193,7 @@ impl of rowiter for rowreader {
         let fields = [];
         while true {
             if do_read {
-                let data: @[char] = @self.f.read_chars(1024u);
+                let data: @[char] = @self.f.read_chars(1u);
                 //io::println(#fmt("len %u '%s'", vec::len(*data), str::from_chars(*data)));
                 if vec::len(*data) == 0u {
                     ret result::err("EOF");
