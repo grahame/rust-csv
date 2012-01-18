@@ -74,7 +74,6 @@ impl of rowaccess for row {
             }
         }
         fn unescape(escaped: [char]) -> [char] {
-            io::println("unescape");
             let r : [char] = [];
             vec::reserve(r, vec::len(escaped));
             let in_q = false;
