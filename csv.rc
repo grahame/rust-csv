@@ -1,0 +1,3 @@
+#[link(name = "csv", vers = "0.1", uuid = "C88F4E89-FC12-4CB3-A978-35D135AEFCFD", author = "grahame")];
+
+mod csv;
