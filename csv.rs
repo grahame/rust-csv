@@ -49,7 +49,7 @@ iface rowaccess {
 }
 
 fn new_reader(+f: io::reader, +delim: char, +quote: char) -> rowreader {
-    let r : rowreader = {
+    {
         readlen: 1024u,
         delim: delim,
         quote: quote,
@@ -57,8 +57,7 @@ fn new_reader(+f: io::reader, +delim: char, +quote: char) -> rowreader {
         mutable offset : 0u,
         mutable buffers : [],
         mutable state : fieldstart(false)
-    };
-    ret r;
+    }
 }
 
 fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> rowreader {
