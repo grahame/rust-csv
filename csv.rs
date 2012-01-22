@@ -148,7 +148,6 @@ impl of rowiter for rowreader {
                 let coffset = self.offset;
                 let c : char = buf[coffset];
                 self.offset += 1u;
-                let old_state = self.state;
                 alt self.state {
                     fieldstart(after_delim) {
                         if c == self.quote {
