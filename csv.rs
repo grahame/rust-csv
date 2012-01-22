@@ -4,11 +4,11 @@ import std::io;
 import std::io::{writer_util, reader_util};
 import result;
 
-tag state {
-    fieldstart(bool);
-    infield(uint, uint);
-    inescapedfield(uint, uint);
-    inquote(uint, uint);
+enum state {
+    fieldstart(bool),
+    infield(uint, uint),
+    inescapedfield(uint, uint),
+    inquote(uint, uint)
 }
 
 type rowreader = {
@@ -24,16 +24,16 @@ type row = {
     fields : [ fieldtype ]
 };
 
-type field = {
+type bufferdescr = {
     escaped: bool,
     buffers: [@[char]],
-    start: uint, // offset into first buffer
-    end: uint // offset into last buffer
+    start: uint,
+    end: uint
 };
 
 enum fieldtype {
-    bufferfield(field);
-    emptyfield();
+    emptyfield(),
+    bufferfield(bufferdescr)
 }
 
 iface rowiter {
@@ -63,13 +63,13 @@ impl of rowaccess for row {
         vec::len(self.fields)
     }
     fn getchars(field: uint) -> [char] {
-        fn extract_field(field: field, &r: [char]) {
+        fn extract_field(buffers: [@[char]], start: uint, end: uint, &r: [char]) {
             let i = 0u;
-            while i < vec::len(field.buffers) {
-                let from = i == 0u ? field.start : 0u;
-                let to = (i == vec::len(field.buffers) - 1u) ? 
-                         field.end : vec::len(*field.buffers[i]);
-                r += vec::slice(*field.buffers[i], from, to);
+            while i < vec::len(buffers) {
+                let from = i == 0u ? start : 0u;
+                let to = (i == vec::len(buffers) - 1u) ? 
+                         end : vec::len(*buffers[i]);
+                r += vec::slice(*buffers[i], from, to);
                 i = i + 1u;
             }
         }
@@ -90,10 +90,10 @@ impl of rowaccess for row {
         }
         alt self.fields[field] {
             emptyfield() { ret []; }
-            bufferfield(field) {
+            bufferfield(desc) {
                 let buf = [];
-                extract_field(field, buf);
-                if field.escaped {
+                extract_field(desc.buffers, desc.start, desc.end, buf);
+                if desc.escaped {
                     buf = unescape(buf);
                 }
                 ret buf;
@@ -124,8 +124,7 @@ impl of rowiter for rowreader {
                         eo = vec::len(*self.buffers[sb]) - 1u;
                     }
                 }
-                bufferfield({escaped: escaped, buffers: vec::slice(self.buffers, sb, eb), 
-                    start: so, end: eo})
+                bufferfield({ escaped: escaped, buffers: vec::slice(self.buffers, sb, eb), start: so, end: eo })
             }
             let cbuffer = vec::len(self.buffers) - 1u;
             let buf: @[char] = self.buffers[cbuffer];
@@ -192,7 +191,7 @@ impl of rowiter for rowreader {
         let fields = [];
         while true {
             if do_read {
-                let data: @[char] = @self.f.read_chars(1u);
+                let data: @[char] = @self.f.read_chars(1024u);
                 //io::println(#fmt("len %u '%s'", vec::len(*data), str::from_chars(*data)));
                 if vec::len(*data) == 0u {
                     ret result::err("EOF");
