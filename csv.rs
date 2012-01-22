@@ -289,6 +289,11 @@ mod tests {
         rowmatch("\"Hello\",\"There is a \"\"fly\"\" in my soup\"\na,b,\"c\",d\n",
                  [["Hello", "There is a \"fly\" in my soup"], ["a", "b", "c", "d"]]);
     }
+
+    #[test]
+    fn test_blank_line() {
+        rowmatch("\n\n", [[], []]);
+    }
 }
 
 
