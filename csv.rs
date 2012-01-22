@@ -3,7 +3,7 @@ import std::io;
 import std::io::{writer_util, reader_util};
 import result;
 
-export rowaccess, rowiter, new_reader;
+export rowaccess, rowiter, new_reader, new_reader_readlen;
 
 enum state {
     fieldstart(bool),
@@ -227,8 +227,10 @@ impl of rowiter for rowreader {
 
 #[cfg(test)]
 mod tests {
-    fn rowmatch(inp : io::reader, expected: [[str]]) {
-        let chk = fn@(r: rowreader) {
+    fn rowmatch(testdata: str, expected: [[str]]) {
+        let chk = fn@(mk: block(io::reader) -> rowreader) {
+            let f = io::string_reader(testdata);
+            let r = mk(f);
             let i = 0u;
             while true {
                 let res = r.readrow();
@@ -247,38 +249,44 @@ mod tests {
             }
             assert(i == vec::len(expected));
         };
-        chk(new_reader(inp, ',', '"'));
-        //chk(new_reader_readlen(inp, ',', '"', 1u));
+        // test default reader params
+        chk({|inp| new_reader(inp, ',', '"') });
+        // test continuations over read buffers
+        let j = 0u;
+        while j < str::char_len(testdata) {
+            chk({|inp| new_reader_readlen(inp, ',', '"', j) });
+            j += 1u;
+        }
     }
 
     #[test]
     fn test_simple() {
-        let inp : io::reader = io::string_reader("a,b,c,d\n1,2,3,4\n");
-        rowmatch(inp, [["a", "b", "c", "d"], ["1", "2", "3", "4"]]);
+        rowmatch("a,b,c,d\n1,2,3,4\n",
+                 [["a", "b", "c", "d"], ["1", "2", "3", "4"]]);
     }
 
     #[test]
     fn test_trailing_comma() {
-        let inp : io::reader = io::string_reader("a,b,c,d\n1,2,3,4,\n");
-        rowmatch(inp, [["a", "b", "c", "d"], ["1", "2", "3", "4", ""]]);
+        rowmatch("a,b,c,d\n1,2,3,4,\n",
+                 [["a", "b", "c", "d"], ["1", "2", "3", "4", ""]]);
     }
 
     #[test]
     fn test_leading_comma() {
-        let inp : io::reader = io::string_reader("a,b,c,d\n,1,2,3,4\n");
-        rowmatch(inp, [["a", "b", "c", "d"], ["", "1", "2", "3", "4"]]);
+        rowmatch("a,b,c,d\n,1,2,3,4\n",
+                 [["a", "b", "c", "d"], ["", "1", "2", "3", "4"]]);
     }
 
     #[test]
     fn test_quote() {
-        let inp : io::reader = io::string_reader("\"Hello\",\"There\"\na,b,\"c\",d\n");
-        rowmatch(inp, [["Hello", "There"], ["a", "b", "c", "d"]]);
+        rowmatch("\"Hello\",\"There\"\na,b,\"c\",d\n",
+                 [["Hello", "There"], ["a", "b", "c", "d"]]);
     }
 
     #[test]
     fn test_quote_in_quote() {
-        let inp : io::reader = io::string_reader("\"Hello\",\"There is a \"\"fly\"\" in my soup\"\na,b,\"c\",d\n");
-        rowmatch(inp, [["Hello", "There is a \"fly\" in my soup"], ["a", "b", "c", "d"]]);
+        rowmatch("\"Hello\",\"There is a \"\"fly\"\" in my soup\"\na,b,\"c\",d\n",
+                 [["Hello", "There is a \"fly\" in my soup"], ["a", "b", "c", "d"]]);
     }
 }
 

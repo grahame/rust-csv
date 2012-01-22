@@ -11,7 +11,7 @@ fn main(args : [str])
         ret;
     }
     let f : io::reader = result::get(io::file_reader(args[1]));
-    let reader = csv::new_reader(f, ',', '"');
+    let reader = csv::new_reader_readlen(f, ',', '"', 1u);
     while true {
         let res = reader.readrow();
         if result::failure(res) {

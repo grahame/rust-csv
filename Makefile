@@ -1,9 +1,9 @@
-all: csv csvtest
+all: libcsv csvtest
 
 clean:
 	rm -f csv
 
-csv: csv.rc
+libcsv: csv.rc
 	rustc --lib -O $<
 
 csvtest: csv.rc csvdump.rs
