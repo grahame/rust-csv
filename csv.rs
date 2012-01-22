@@ -129,7 +129,7 @@ impl of rowiter for rowreader {
                 let sb = sb, so = so, eo = eo;
                 if escaped {
                     so += 1u;
-                    if so >= vec::len(*self.buffers[sb]) {
+                    if so > vec::len(*self.buffers[sb]) {
                         sb += 1u;
                         so = vec::len(*self.buffers[sb]) - 1u;
                     }
@@ -148,6 +148,7 @@ impl of rowiter for rowreader {
                 let coffset = self.offset;
                 let c : char = buf[coffset];
                 self.offset += 1u;
+                let old_state = self.state;
                 alt self.state {
                     fieldstart(after_delim) {
                         if c == self.quote {
@@ -239,6 +240,7 @@ mod tests {
                 }
                 let row = result::get(res);
                 let expect = expected[i];
+
                 assert(row.len() == vec::len(expect));
                 let j = 0u;
                 while j < row.len() {
@@ -250,9 +252,9 @@ mod tests {
             assert(i == vec::len(expected));
         };
         // test default reader params
-        chk({|inp| new_reader(inp, ',', '"') });
+        chk({|inp| new_reader_readlen(inp, ',', '"', 2u) });
         // test continuations over read buffers
-        let j = 0u;
+        let j = 1u;
         while j < str::char_len(testdata) {
             chk({|inp| new_reader_readlen(inp, ',', '"', j) });
             j += 1u;
@@ -278,13 +280,13 @@ mod tests {
     }
 
     #[test]
-    fn test_quote() {
+    fn test_quote_simple() {
         rowmatch("\"Hello\",\"There\"\na,b,\"c\",d\n",
                  [["Hello", "There"], ["a", "b", "c", "d"]]);
     }
 
     #[test]
-    fn test_quote_in_quote() {
+    fn test_quote_nested() {
         rowmatch("\"Hello\",\"There is a \"\"fly\"\" in my soup\"\na,b,\"c\",d\n",
                  [["Hello", "There is a \"fly\" in my soup"], ["a", "b", "c", "d"]]);
     }
