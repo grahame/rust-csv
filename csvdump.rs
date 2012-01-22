@@ -1,6 +1,9 @@
 
-use std::io;
+use std;
+import std::io;
+
 use csv;
+import csv::{rowaccess,rowiter};
 
 fn main(args : [str])
 {
@@ -8,7 +11,7 @@ fn main(args : [str])
         ret;
     }
     let f : io::reader = result::get(io::file_reader(args[1]));
-    let reader = new_reader(f, ',', '"');
+    let reader = csv::new_reader(f, ',', '"');
     while true {
         let res = reader.readrow();
         if result::failure(res) {

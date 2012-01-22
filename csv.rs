@@ -3,6 +3,8 @@ import std::io;
 import std::io::{writer_util, reader_util};
 import result;
 
+export rowaccess, rowiter, new_reader;
+
 enum state {
     fieldstart(bool),
     infield(uint, uint),
@@ -11,6 +13,7 @@ enum state {
 }
 
 type rowreader = {
+    readlen: uint,
     delim: char,
     quote: char,
     f : io::reader,
@@ -47,6 +50,20 @@ iface rowaccess {
 
 fn new_reader(+f: io::reader, +delim: char, +quote: char) -> rowreader {
     let r : rowreader = {
+        readlen: 1024u,
+        delim: delim,
+        quote: quote,
+        f: f,
+        mutable offset : 0u,
+        mutable buffers : [],
+        mutable state : fieldstart(false)
+    };
+    ret r;
+}
+
+fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> rowreader {
+    let r : rowreader = {
+        readlen: rl,
         delim: delim,
         quote: quote,
         f: f,
@@ -133,7 +150,6 @@ impl of rowiter for rowreader {
                 self.offset += 1u;
                 alt self.state {
                     fieldstart(after_delim) {
-                        //io::println(#fmt("fieldstart : after_delim %b", after_delim));
                         if c == self.quote {
                             self.state = inescapedfield(cbuffer, coffset);
                         } else if c == '\n' {
@@ -149,7 +165,6 @@ impl of rowiter for rowreader {
                         }
                     }
                     infield(b,o) {
-                        //io::println(#fmt("field : %u %u", b, o));
                         if c == '\n' {
                             fields += [new_bufferfield(self, false, b, o, coffset)];
                             ret true;
@@ -159,7 +174,6 @@ impl of rowiter for rowreader {
                         }
                     }
                     inescapedfield(b, o) {
-                        //io::println(#fmt("inescapedfield : %u %u", b, o));
                         if c == self.quote {
                             self.state = inquote(b, o);
                         } else if c == self.delim {
@@ -168,7 +182,6 @@ impl of rowiter for rowreader {
                         }
                     }
                     inquote(b, o) {
-                        //io::println(#fmt("inquote : %u %u", b, o));
                         if c == '\n' {
                             fields += [new_bufferfield(self, true, b, o, coffset)];
                             ret true;
@@ -190,8 +203,7 @@ impl of rowiter for rowreader {
         let fields = [];
         while true {
             if do_read {
-                let data: @[char] = @self.f.read_chars(4096u);
-                //io::println(#fmt("len %u '%s'", vec::len(*data), str::from_chars(*data)));
+                let data: @[char] = @self.f.read_chars(self.readlen);
                 if vec::len(*data) == 0u {
                     ret result::err("EOF");
                 }
@@ -212,3 +224,65 @@ impl of rowiter for rowreader {
         ret result::err("unreachable");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    fn rowmatch(inp : io::reader, expected: [[str]]) {
+        let chk = fn@(r: rowreader) {
+            let i = 0u;
+            while true {
+                let res = r.readrow();
+                if result::failure(res) {
+                    break;
+                }
+                let row = result::get(res);
+                let expect = expected[i];
+                assert(row.len() == vec::len(expect));
+                let j = 0u;
+                while j < row.len() {
+                    assert(row.getstr(j) == expect[j]);
+                    j += 1u;
+                }
+                i += 1u;
+            }
+            assert(i == vec::len(expected));
+        };
+        chk(new_reader(inp, ',', '"'));
+        //chk(new_reader_readlen(inp, ',', '"', 1u));
+    }
+
+    #[test]
+    fn test_simple() {
+        let inp : io::reader = io::string_reader("a,b,c,d\n1,2,3,4\n");
+        rowmatch(inp, [["a", "b", "c", "d"], ["1", "2", "3", "4"]]);
+    }
+
+    #[test]
+    fn test_trailing_comma() {
+        let inp : io::reader = io::string_reader("a,b,c,d\n1,2,3,4,\n");
+        rowmatch(inp, [["a", "b", "c", "d"], ["1", "2", "3", "4", ""]]);
+    }
+
+    #[test]
+    fn test_leading_comma() {
+        let inp : io::reader = io::string_reader("a,b,c,d\n,1,2,3,4\n");
+        rowmatch(inp, [["a", "b", "c", "d"], ["", "1", "2", "3", "4"]]);
+    }
+
+    #[test]
+    fn test_quote() {
+        let inp : io::reader = io::string_reader("\"Hello\",\"There\"\na,b,\"c\",d\n");
+        rowmatch(inp, [["Hello", "There"], ["a", "b", "c", "d"]]);
+    }
+
+    #[test]
+    fn test_quote_in_quote() {
+        let inp : io::reader = io::string_reader("\"Hello\",\"There is a \"\"fly\"\" in my soup\"\na,b,\"c\",d\n");
+        rowmatch(inp, [["Hello", "There is a \"fly\" in my soup"], ["a", "b", "c", "d"]]);
+    }
+}
+
+
+
+
+
