@@ -18,5 +18,5 @@ This package implements a parser for the RFC 4180 CSV file format.
         }
     }
 
-See the `tests` module in `csv.rs` for more examples.
+See the `test` module in `csv.rs` for more examples.
 

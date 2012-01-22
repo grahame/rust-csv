@@ -62,7 +62,7 @@ fn new_reader(+f: io::reader, +delim: char, +quote: char) -> rowreader {
 }
 
 fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> rowreader {
-    let r : rowreader = {
+    {
         readlen: rl,
         delim: delim,
         quote: quote,
@@ -70,8 +70,7 @@ fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> r
         mutable offset : 0u,
         mutable buffers : [],
         mutable state : fieldstart(false)
-    };
-    ret r;
+    }
 }
 
 impl of rowaccess for row {
@@ -226,7 +225,7 @@ impl of rowiter for rowreader {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     fn rowmatch(testdata: str, expected: [[str]]) {
         let chk = fn@(mk: block(io::reader) -> rowreader) {
             let f = io::string_reader(testdata);
