@@ -191,7 +191,7 @@ impl of rowiter for rowreader {
         let fields = [];
         while true {
             if do_read {
-                let data: @[char] = @self.f.read_chars(1024u);
+                let data: @[char] = @self.f.read_chars(4096u);
                 //io::println(#fmt("len %u '%s'", vec::len(*data), str::from_chars(*data)));
                 if vec::len(*data) == 0u {
                     ret result::err("EOF");
