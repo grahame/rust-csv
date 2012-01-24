@@ -77,16 +77,6 @@ impl of rowaccess for row {
         vec::len(self.fields)
     }
     fn getchars(field: uint) -> [char] {
-        fn extract_field(buffers: [@[char]], start: uint, end: uint, &r: [char]) {
-            let i = 0u;
-            while i < vec::len(buffers) {
-                let from = i == 0u ? start : 0u;
-                let to = (i == vec::len(buffers) - 1u) ? 
-                         end : vec::len(*buffers[i]);
-                r += vec::slice(*buffers[i], from, to);
-                i = i + 1u;
-            }
-        }
         fn unescape(escaped: [char]) -> [char] {
             let r : [char] = [];
             vec::reserve(r, vec::len(escaped));
@@ -106,7 +96,16 @@ impl of rowaccess for row {
             emptyfield() { ret []; }
             bufferfield(desc) {
                 let buf = [];
-                extract_field(desc.buffers, desc.start, desc.end, buf);
+                { 
+                    let i = 0u;
+                    while i < vec::len(desc.buffers) {
+                        let from = i == 0u ? desc.start : 0u;
+                        let to = (i == vec::len(desc.buffers) - 1u) ? 
+                                 desc.end : vec::len(*desc.buffers[i]);
+                        buf += vec::slice(*desc.buffers[i], from, to);
+                        i = i + 1u;
+                    }
+                }
                 if desc.escaped {
                     buf = unescape(buf);
                 }
