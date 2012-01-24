@@ -226,7 +226,7 @@ impl of rowiter for rowreader {
 #[cfg(test)]
 mod test {
     fn rowmatch(testdata: str, expected: [[str]]) {
-        let chk = fn@(mk: block(io::reader) -> rowreader) {
+        let chk = fn@(mk: fn(io::reader) -> rowreader) {
             let f = io::string_reader(testdata);
             let r = mk(f);
             let i = 0u;
