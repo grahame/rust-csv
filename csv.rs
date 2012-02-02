@@ -99,9 +99,10 @@ impl of rowaccess for row {
                 { 
                     let i = 0u;
                     while i < vec::len(desc.buffers) {
-                        let from = i == 0u ? desc.start : 0u;
-                        let to = (i == vec::len(desc.buffers) - 1u) ? 
-                                 desc.end : vec::len(*desc.buffers[i]);
+                        let from = if (i == 0u)
+                            { desc.start } else { 0u };
+                        let to = if (i == vec::len(desc.buffers) - 1u)
+                            { desc.end } else { vec::len(*desc.buffers[i]) };
                         buf += vec::slice(*desc.buffers[i], from, to);
                         i = i + 1u;
                     }
