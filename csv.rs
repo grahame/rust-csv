@@ -252,7 +252,7 @@ mod test {
         chk({|inp| new_reader_readlen(inp, ',', '"', 2u) });
         // test continuations over read buffers
         let j = 1u;
-        while j < str::char_len(testdata) {
+        while j < str::len(testdata) {
             chk({|inp| new_reader_readlen(inp, ',', '"', j) });
             j += 1u;
         }
