@@ -3,7 +3,7 @@ import std::io;
 import std::io::{writer_util, reader_util};
 import result;
 
-export rowaccess, rowiter, new_reader, new_reader_readlen;
+export rowreader, rowaccess, rowiter, new_reader, new_reader_readlen;
 
 enum state {
     fieldstart(bool),
