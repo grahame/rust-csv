@@ -4,7 +4,10 @@ import std::io::{writer_util, reader_util};
 import std::map;
 import result;
 
-export rowreader, rowaccess, rowiter, new_reader, new_reader_readlen, hashmap_iter;
+export rowreader, rowaccess, rowiter,
+       new_reader, new_reader_readlen,
+       hashmap_iter, hashmap_iter_cols,
+       hashmap_iter_with_map;
 
 enum state {
     fieldstart(bool),
@@ -117,6 +120,13 @@ impl of rowaccess for row {
     }
     fn getstr(field: uint) -> str {
         ret str::from_chars(self.getchars(field));
+    }
+    fn getall() -> [str] {
+        let a = [];
+        self.map() { |s| 
+            a += [s];
+        }
+        ret a;
     }
     fn map(f: fn(s: str)) {
         let i = 0u;
@@ -232,17 +242,7 @@ impl of rowiter for rowreader {
     }
 }
 
-// reads the first row as a header, to derive keys for a hashmap
-// emitted for each subsequent row
-fn hashmap_iter(r: rowreader, f: fn(map::hashmap<str, str>)) {
-    let res = r.readrow();
-    if result::failure(res) {
-        ret;
-    }
-    let header = [];
-    result::get(res).map() { |s| 
-        header += [s];
-    }
+fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
     while true {
         let res = r.readrow();
         if result::failure(res) {
@@ -251,10 +251,35 @@ fn hashmap_iter(r: rowreader, f: fn(map::hashmap<str, str>)) {
         let m : map::hashmap<str, str> = map::new_str_hash();
         let col = 0u;
         result::get(res).map() { |s|
-            m.insert(header[col], s);
+            m.insert(cols[col], s);
             col += 1u;
         };
         f(m);
+    }
+}
+
+// reads the first row as a header, to derive keys for a hashmap
+// emitted for each subsequent row
+fn hashmap_iter(r: rowreader, f: fn(map::hashmap<str, str>)) {
+    let res = r.readrow();
+    alt res {
+        result::ok(row) {
+            hashmap_iter_cols(r, result::get(res).getall(), f);
+        }
+        result::err(_) { }
+    }
+}
+
+// as hashmap_iter, but first apply 'hc' to each header; allows
+// cleaning up headers
+fn hashmap_iter_with_map(r: rowreader, hc: fn(&&h: str) -> str, f: fn(map::hashmap<str, str>)) {
+    let res = r.readrow();
+    alt res {
+        result::ok(row) {
+            let cols : [str] = vec::map(result::get(res).getall(), hc);
+            hashmap_iter_cols(r, cols, f);
+        }
+        result::err(_) { }
     }
 }
 
