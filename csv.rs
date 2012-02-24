@@ -249,11 +249,15 @@ mod test {
             assert(i == vec::len(expected));
         };
         // test default reader params
-        chk({|inp| new_reader_readlen(inp, ',', '"', 2u) });
+        chk() { |inp|
+            new_reader_readlen(inp, ',', '"', 2u)
+        };
         // test continuations over read buffers
         let j = 1u;
         while j < str::len(testdata) {
-            chk({|inp| new_reader_readlen(inp, ',', '"', j) });
+            chk() { |inp|
+                new_reader_readlen(inp, ',', '"', j)
+            };
             j += 1u;
         }
     }
