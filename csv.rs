@@ -1,9 +1,10 @@
 use std;
 import std::io;
 import std::io::{writer_util, reader_util};
+import std::map;
 import result;
 
-export rowreader, rowaccess, rowiter, new_reader, new_reader_readlen;
+export rowreader, rowaccess, rowiter, new_reader, new_reader_readlen, hashmap_iter;
 
 enum state {
     fieldstart(bool),
@@ -117,6 +118,14 @@ impl of rowaccess for row {
     fn getstr(field: uint) -> str {
         ret str::from_chars(self.getchars(field));
     }
+    fn map(f: fn(s: str)) {
+        let i = 0u;
+        let len = self.len();
+        while i < len {
+            f(self.getstr(i));
+            i += 1u;
+        }
+    }
 }
 
 impl of rowiter for rowreader {
@@ -220,6 +229,32 @@ impl of rowiter for rowreader {
             do_read = true;
         }
         ret result::err("unreachable");
+    }
+}
+
+// reads the first row as a header, to derive keys for a hashmap
+// emitted for each subsequent row
+fn hashmap_iter(r: rowreader, f: fn(map::hashmap<str, str>)) {
+    let res = r.readrow();
+    if result::failure(res) {
+        ret;
+    }
+    let header = [];
+    result::get(res).map() { |s| 
+        header += [s];
+    }
+    while true {
+        let res = r.readrow();
+        if result::failure(res) {
+            break;
+        }
+        let m : map::hashmap<str, str> = map::new_str_hash();
+        let col = 0u;
+        result::get(res).map() { |s|
+            m.insert(header[col], s);
+            col += 1u;
+        };
+        f(m);
     }
 }
 
