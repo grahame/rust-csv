@@ -110,6 +110,15 @@ impl of rowaccess for row {
                         i = i + 1u;
                     }
                 }
+                if field == self.len() - 1u {
+                    // there may be a trailing \r on the last field; we should strip it
+                    // if so. bodgy here but seems the most efficient place to deal with this
+                    if vec::len(buf) > 0u {
+                        if buf[vec::len(buf)-1u] == '\r' {
+                            buf = vec::slice(buf, 0u, vec::len(buf)-1u);
+                        }
+                    }
+                }
                 if desc.escaped {
                     buf = unescape(buf);
                 }
@@ -249,6 +258,10 @@ fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
         }
         let m : map::hashmap<str, str> = map::new_str_hash();
         let col = 0u;
+        let row = result::get(res);
+        if row.len() != vec::len(cols) {
+            cont; // FIXME: how to flag that we dropped a crazy row?
+        }
         result::get(res).map() { |s|
             m.insert(cols[col], s);
             col += 1u;
@@ -311,18 +324,22 @@ mod test {
             }
             assert(i == vec::len(expected));
         };
-        // test default reader params
-        chk() { |inp|
-            new_reader_readlen(inp, ',', '"', 2u)
-        };
-        // test continuations over read buffers
-        let j = 1u;
-        while j < str::len(testdata) {
+        let runchecks = fn@(testdata: str) {
+            // test default reader params
             chk() { |inp|
-                new_reader_readlen(inp, ',', '"', j)
+                new_reader_readlen(inp, ',', '"', 2u)
             };
-            j += 1u;
-        }
+            // test continuations over read buffers
+            let j = 1u;
+            while j < str::len(testdata) {
+                chk() { |inp|
+                    new_reader_readlen(inp, ',', '"', j)
+                };
+                j += 1u;
+            }
+        };
+        runchecks(testdata);
+        runchecks(str::replace(testdata, "\n", "\r\n"));
     }
 
     #[test]
@@ -356,12 +373,14 @@ mod test {
     }
 
     #[test]
+    fn test_quote_with_comma() {
+        rowmatch("1,2,3,\"a,b,c\"",
+                 [["1", "2", "3", "a,b,c"]])
+    }
+
+    #[test]
     fn test_blank_line() {
         rowmatch("\n\n", [[], []]);
     }
 }
-
-
-
-
 
