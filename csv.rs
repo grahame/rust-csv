@@ -6,8 +6,7 @@ import result;
 
 export rowreader, rowaccess, rowiter,
        new_reader, new_reader_readlen,
-       hashmap_iter, hashmap_iter_cols,
-       hashmap_iter_with_map;
+       hashmap_iter, hashmap_iter_full;
 
 enum state {
     fieldstart(bool),
@@ -271,12 +270,16 @@ fn hashmap_iter(r: rowreader, f: fn(map::hashmap<str, str>)) {
 }
 
 // as hashmap_iter, but first apply 'hc' to each header; allows
-// cleaning up headers
-fn hashmap_iter_with_map(r: rowreader, hc: fn(&&h: str) -> str, f: fn(map::hashmap<str, str>)) {
+// cleaning up headers; also allows verification that heads are 
+// satisfactory
+fn hashmap_iter_full(r: rowreader, hmap: fn(&&h: str) -> str, hver: fn(cols: [str]) -> bool, f: fn(map::hashmap<str, str>)) {
     let res = r.readrow();
     alt res {
         result::ok(row) {
-            let cols : [str] = vec::map(result::get(res).getall(), hc);
+            let cols : [str] = vec::map(result::get(res).getall(), hmap);
+            if !hver(cols) {
+                ret;
+            }
             hashmap_iter_cols(r, cols, f);
         }
         result::err(_) { }
