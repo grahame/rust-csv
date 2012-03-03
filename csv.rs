@@ -167,11 +167,28 @@ impl of rowiter for rowreader {
                 }
                 bufferfield({ escaped: escaped, buffers: vec::slice(self.buffers, sb, eb), start: so, end: eo })
             }
+            fn statestr(state: state) -> str {
+                alt state {
+                    fieldstart(after_delim) {
+                        #fmt("fieldstart : after_delim %b", after_delim)
+                    }
+                    infield(b,o) { 
+                        #fmt("field : %u %u", b, o)
+                    }
+                    inescapedfield(b, o) {
+                        #fmt("inescapedfield : %u %u", b, o)
+                    }
+                    inquote(b, o) {
+                        #fmt("inquote : %u %u", b, o)
+                    }
+                }
+            }
             let cbuffer = vec::len(self.buffers) - 1u;
             let buf: @[char] = self.buffers[cbuffer];
             while self.offset < vec::len(*buf) {
                 let coffset = self.offset;
                 let c : char = buf[coffset];
+                //io::println(#fmt("-> %c | %s", c, statestr(self.state)));
                 self.offset += 1u;
                 alt self.state {
                     fieldstart(after_delim) {
@@ -201,12 +218,14 @@ impl of rowiter for rowreader {
                     inescapedfield(b, o) {
                         if c == self.quote {
                             self.state = inquote(b, o);
-                        } else if c == self.delim {
-                            self.state = fieldstart(true);
-                            fields += [new_bufferfield(self, true, b, o, coffset)];
+                        }
+                        else if c == self.delim {
+                         self.state = fieldstart(true);
+                         fields += [new_bufferfield(self, true, b, o, coffset)];
                         }
                     }
                     inquote(b, o) {
+                        //io::println(#fmt("inquote : %u %u", b, o));
                         if c == '\n' {
                             fields += [new_bufferfield(self, true, b, o, coffset)];
                             ret true;
@@ -219,6 +238,7 @@ impl of rowiter for rowreader {
                         // swallow odd chars, eg. space between field and "
                     }
                 }
+                //io::println(#fmt(".... %s", statestr(self.state)));
             }
             ret false;
         }
@@ -303,7 +323,7 @@ fn hashmap_iter_full(r: rowreader, hmap: fn(&&h: str) -> str, hver: fn(cols: [st
 mod test {
     fn rowmatch(testdata: str, expected: [[str]]) {
         let chk = fn@(mk: fn(io::reader) -> rowreader) {
-            let f = io::string_reader(testdata);
+            let f = io::str_reader(testdata);
             let r = mk(f);
             let i = 0u;
             while true {
@@ -374,6 +394,12 @@ mod test {
 
     #[test]
     fn test_quote_with_comma() {
+        rowmatch("\"1,2\"\n",
+                 [["1,2"]])
+    }
+
+    #[test]
+    fn test_quote_with_other_comma() {
         rowmatch("1,2,3,\"a,b,c\"",
                  [["1", "2", "3", "a,b,c"]])
     }
