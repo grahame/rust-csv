@@ -11,7 +11,7 @@ export rowreader, rowaccess, rowiter,
 enum state {
     fieldstart(bool),
     infield(uint, uint),
-    inescapedfield(uint, uint),
+    inquotedfield(uint, uint),
     inquote(uint, uint)
 }
 
@@ -148,6 +148,22 @@ impl of rowaccess for row {
 
 impl of rowiter for rowreader {
     fn readrow() -> result::t<row, str> {
+        fn statestr(state: state) -> str {
+            alt state {
+                fieldstart(after_delim) {
+                    #fmt("fieldstart : after_delim %b", after_delim)
+                }
+                infield(b,o) { 
+                    #fmt("field : %u %u", b, o)
+                }
+                inquotedfield(b, o) {
+                    #fmt("inquotedfield : %u %u", b, o)
+                }
+                inquote(b, o) {
+                    #fmt("inquote : %u %u", b, o)
+                }
+            }
+        }
         fn row_from_buf(self: rowreader, &fields: [fieldtype]) -> bool {
             fn new_bufferfield(self: rowreader, escaped: bool, sb: uint, so: uint, eo: uint) -> fieldtype {
                 let eb = vec::len(self.buffers);
@@ -167,33 +183,18 @@ impl of rowiter for rowreader {
                 }
                 bufferfield({ escaped: escaped, buffers: vec::slice(self.buffers, sb, eb), start: so, end: eo })
             }
-            fn statestr(state: state) -> str {
-                alt state {
-                    fieldstart(after_delim) {
-                        #fmt("fieldstart : after_delim %b", after_delim)
-                    }
-                    infield(b,o) { 
-                        #fmt("field : %u %u", b, o)
-                    }
-                    inescapedfield(b, o) {
-                        #fmt("inescapedfield : %u %u", b, o)
-                    }
-                    inquote(b, o) {
-                        #fmt("inquote : %u %u", b, o)
-                    }
-                }
-            }
             let cbuffer = vec::len(self.buffers) - 1u;
             let buf: @[char] = self.buffers[cbuffer];
             while self.offset < vec::len(*buf) {
                 let coffset = self.offset;
                 let c : char = buf[coffset];
-                //io::println(#fmt("-> %c | %s", c, statestr(self.state)));
+                #debug("-> %c | %s", c, statestr(self.state));
                 self.offset += 1u;
                 alt self.state {
                     fieldstart(after_delim) {
+                        #debug("fieldstart : after_delim %b", after_delim);
                         if c == self.quote {
-                            self.state = inescapedfield(cbuffer, coffset);
+                            self.state = inquotedfield(cbuffer, coffset);
                         } else if c == '\n' {
                             if after_delim {
                                 fields += [emptyfield];
@@ -207,6 +208,7 @@ impl of rowiter for rowreader {
                         }
                     }
                     infield(b,o) {
+                        #debug("field : %u %u", b, o);
                         if c == '\n' {
                             fields += [new_bufferfield(self, false, b, o, coffset)];
                             ret true;
@@ -215,22 +217,19 @@ impl of rowiter for rowreader {
                             fields += [new_bufferfield(self, false, b, o, coffset)];
                         }
                     }
-                    inescapedfield(b, o) {
+                    inquotedfield(b, o) {
+                        #debug("inquotedfield : %u %u", b, o);
                         if c == self.quote {
                             self.state = inquote(b, o);
                         }
-                        else if c == self.delim {
-                         self.state = fieldstart(true);
-                         fields += [new_bufferfield(self, true, b, o, coffset)];
-                        }
                     }
                     inquote(b, o) {
-                        //io::println(#fmt("inquote : %u %u", b, o));
+                        #debug("inquote : %u %u", b, o);
                         if c == '\n' {
                             fields += [new_bufferfield(self, true, b, o, coffset)];
                             ret true;
                         } else if c == self.quote {
-                            self.state = inescapedfield(b, o);
+                            self.state = inquotedfield(b, o);
                         } else if c == self.delim {
                             self.state = fieldstart(true);
                             fields += [new_bufferfield(self, true, b, o, coffset)];
@@ -238,7 +237,7 @@ impl of rowiter for rowreader {
                         // swallow odd chars, eg. space between field and "
                     }
                 }
-                //io::println(#fmt(".... %s", statestr(self.state)));
+                #debug(".... %s", statestr(self.state));
             }
             ret false;
         }
@@ -400,7 +399,7 @@ mod test {
 
     #[test]
     fn test_quote_with_other_comma() {
-        rowmatch("1,2,3,\"a,b,c\"",
+        rowmatch("1,2,3,\"a,b,c\"\n",
                  [["1", "2", "3", "a,b,c"]])
     }
 
