@@ -22,7 +22,9 @@ type rowreader = {
     f : io::reader,
     mutable offset : uint,
     mutable buffers : [@[char]],
-    mutable state : state
+    mutable state : state,
+    mutable trailing_nl : bool,
+    mutable terminating : bool
 };
 
 type row = {
@@ -59,7 +61,9 @@ fn new_reader(+f: io::reader, +delim: char, +quote: char) -> rowreader {
         f: f,
         mutable offset : 0u,
         mutable buffers : [],
-        mutable state : fieldstart(false)
+        mutable state : fieldstart(false),
+        mutable trailing_nl : false,
+        mutable terminating: false
     }
 }
 
@@ -71,7 +75,9 @@ fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> r
         f: f,
         mutable offset : 0u,
         mutable buffers : [],
-        mutable state : fieldstart(false)
+        mutable state : fieldstart(false),
+        mutable trailing_nl : false,
+        mutable terminating: false
     }
 }
 
@@ -166,8 +172,11 @@ impl of rowiter for rowreader {
         }
         fn row_from_buf(self: rowreader, &fields: [fieldtype]) -> bool {
             fn new_bufferfield(self: rowreader, escaped: bool, sb: uint, so: uint, eo: uint) -> fieldtype {
-                let eb = vec::len(self.buffers);
+                let eb = vec::len(self.buffers) - 1u;
                 let sb = sb, so = so, eo = eo;
+                //#debug("sb %u so %u eb %u eo %u", sb, so, eb, eo);
+                //log(debug, vec::map(self.buffers) { |t| str::from_chars(*t) } );
+                //log(debug, vec::map(self.buffers) { |t| vec::len(*t) });
                 if escaped {
                     so += 1u;
                     if so > vec::len(*self.buffers[sb]) {
@@ -178,17 +187,18 @@ impl of rowiter for rowreader {
                         eo -= 1u;
                     } else {
                         eb -= 1u;
-                        eo = vec::len(*self.buffers[sb]) - 1u;
+                        eo = vec::len(*self.buffers[eb]) - 1u;
                     }
                 }
-                bufferfield({ escaped: escaped, buffers: vec::slice(self.buffers, sb, eb), start: so, end: eo })
+                //#debug("sb %u so %u eb %u eo %u", sb, so, eb, eo);
+                bufferfield({ escaped: escaped, buffers: vec::slice(self.buffers, sb, eb+1u), start: so, end: eo })
             }
             let cbuffer = vec::len(self.buffers) - 1u;
             let buf: @[char] = self.buffers[cbuffer];
             while self.offset < vec::len(*buf) {
                 let coffset = self.offset;
                 let c : char = buf[coffset];
-                #debug("-> %c | %s", c, statestr(self.state));
+                #debug("got '%c' | %s", c, statestr(self.state));
                 self.offset += 1u;
                 alt self.state {
                     fieldstart(after_delim) {
@@ -237,7 +247,7 @@ impl of rowiter for rowreader {
                         // swallow odd chars, eg. space between field and "
                     }
                 }
-                #debug(".... %s", statestr(self.state));
+                #debug("now %s", statestr(self.state));
             }
             ret false;
         }
@@ -245,11 +255,19 @@ impl of rowiter for rowreader {
         self.state = fieldstart(false);
         let do_read = vec::len(self.buffers) == 0u;
         let fields = [];
-        while true {
+
+        while !self.terminating {
             if do_read {
                 let data: @[char] = @self.f.read_chars(self.readlen);
                 if vec::len(*data) == 0u {
-                    ret result::err("EOF");
+                    if !self.trailing_nl {
+                        self.terminating = true;
+                        data = @['\n'];
+                    } else {
+                        ret result::err("EOF");
+                    }
+                } else {
+                    self.trailing_nl = data[vec::len(*data) - 1u] == '\n';
                 }
                 self.buffers += [data];
                 self.offset = 0u;
@@ -356,50 +374,54 @@ mod test {
                 };
                 j += 1u;
             }
+            ret;
         };
+        // so we can test trailing newline case, testdata
+        // must not end in \n - leave off the last newline
         runchecks(testdata);
+        runchecks(testdata+"\n");
         runchecks(str::replace(testdata, "\n", "\r\n"));
     }
 
     #[test]
     fn test_simple() {
-        rowmatch("a,b,c,d\n1,2,3,4\n",
+        rowmatch("a,b,c,d\n1,2,3,4",
                  [["a", "b", "c", "d"], ["1", "2", "3", "4"]]);
     }
 
     #[test]
     fn test_trailing_comma() {
-        rowmatch("a,b,c,d\n1,2,3,4,\n",
+        rowmatch("a,b,c,d\n1,2,3,4,",
                  [["a", "b", "c", "d"], ["1", "2", "3", "4", ""]]);
     }
 
     #[test]
     fn test_leading_comma() {
-        rowmatch("a,b,c,d\n,1,2,3,4\n",
+        rowmatch("a,b,c,d\n,1,2,3,4",
                  [["a", "b", "c", "d"], ["", "1", "2", "3", "4"]]);
     }
 
     #[test]
     fn test_quote_simple() {
-        rowmatch("\"Hello\",\"There\"\na,b,\"c\",d\n",
+        rowmatch("\"Hello\",\"There\"\na,b,\"c\",d",
                  [["Hello", "There"], ["a", "b", "c", "d"]]);
     }
 
     #[test]
     fn test_quote_nested() {
-        rowmatch("\"Hello\",\"There is a \"\"fly\"\" in my soup\"\na,b,\"c\",d\n",
+        rowmatch("\"Hello\",\"There is a \"\"fly\"\" in my soup\"\na,b,\"c\",d",
                  [["Hello", "There is a \"fly\" in my soup"], ["a", "b", "c", "d"]]);
     }
 
     #[test]
     fn test_quote_with_comma() {
-        rowmatch("\"1,2\"\n",
+        rowmatch("\"1,2\"",
                  [["1,2"]])
     }
 
     #[test]
     fn test_quote_with_other_comma() {
-        rowmatch("1,2,3,\"a,b,c\"\n",
+        rowmatch("1,2,3,\"a,b,c\"",
                  [["1", "2", "3", "a,b,c"]])
     }
 
