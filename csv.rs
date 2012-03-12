@@ -289,7 +289,7 @@ impl of rowiter for rowreader {
 }
 
 fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
-    while true {
+    loop {
         let res = r.readrow();
         if result::failure(res) {
             break;
@@ -344,7 +344,7 @@ mod test {
             let f = io::str_reader(testdata);
             let r = mk(f);
             let i = 0u;
-            while true {
+            loop {
                 let res = r.readrow();
                 if result::failure(res) {
                     break;
