@@ -1,6 +1,5 @@
 use std;
-import std::io;
-import std::io::{writer_util, reader_util};
+import io::{writer_util, reader_util};
 import std::map;
 import map::hashmap;
 import result;
