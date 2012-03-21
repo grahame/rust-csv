@@ -44,7 +44,7 @@ enum fieldtype {
 }
 
 iface rowiter {
-    fn readrow() -> result::t<row, str>;
+    fn readrow() -> result::result<row, str>;
 }
 
 iface rowaccess {
@@ -153,7 +153,7 @@ impl of rowaccess for row {
 }
 
 impl of rowiter for rowreader {
-    fn readrow() -> result::t<row, str> {
+    fn readrow() -> result::result<row, str> {
         fn statestr(state: state) -> str {
             alt state {
                 fieldstart(after_delim) {
@@ -293,7 +293,7 @@ fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
         if result::failure(res) {
             break;
         }
-        let m : map::hashmap<str, str> = map::new_str_hash();
+        let m : map::hashmap<str, str> = map::str_hash();
         let col = 0u;
         let row = result::get(res);
         if row.len() != vec::len(cols) {
