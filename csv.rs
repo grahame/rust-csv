@@ -87,9 +87,9 @@ impl of rowaccess for row {
     }
     fn getchars(field: uint) -> [char] {
         fn unescape(escaped: [char]) -> [char] {
-            let r : [char] = [];
+            let mut r : [char] = [];
             vec::reserve(r, vec::len(escaped));
-            let in_q = false;
+            let mut in_q = false;
             for c in escaped { 
                 if in_q { 
                     assert(c == '"');
@@ -104,9 +104,9 @@ impl of rowaccess for row {
         alt self.fields[field] {
             emptyfield() { ret []; }
             bufferfield(desc) {
-                let buf = [];
+                let mut buf = [];
                 { 
-                    let i = 0u;
+                    let mut i = 0u;
                     while i < vec::len(desc.buffers) {
                         let from = if (i == 0u)
                             { desc.start } else { 0u };
@@ -136,14 +136,14 @@ impl of rowaccess for row {
         ret str::from_chars(self.getchars(field));
     }
     fn getall() -> [str] {
-        let a = [];
+        let mut a = [];
         self.map() { |s| 
             a += [s];
         }
         ret a;
     }
     fn map(f: fn(s: str)) {
-        let i = 0u;
+        let mut i = 0u;
         let len = self.len();
         while i < len {
             f(self.getstr(i));
@@ -172,8 +172,8 @@ impl of rowiter for rowreader {
         }
         fn row_from_buf(self: rowreader, &fields: [fieldtype]) -> bool {
             fn new_bufferfield(self: rowreader, escaped: bool, sb: uint, so: uint, eo: uint) -> fieldtype {
-                let eb = vec::len(self.buffers) - 1u;
-                let sb = sb, so = so, eo = eo;
+                let mut eb = vec::len(self.buffers) - 1u;
+                let mut sb = sb, so = so, eo = eo;
                 //#debug("sb %u so %u eb %u eo %u", sb, so, eb, eo);
                 //log(debug, vec::map(self.buffers) { |t| str::from_chars(*t) } );
                 //log(debug, vec::map(self.buffers) { |t| vec::len(*t) });
@@ -253,12 +253,12 @@ impl of rowiter for rowreader {
         }
 
         self.state = fieldstart(false);
-        let do_read = vec::len(self.buffers) == 0u;
-        let fields = [];
+        let mut do_read = vec::len(self.buffers) == 0u;
+        let mut fields = [];
 
         while !self.terminating {
             if do_read {
-                let data: @[char] = @self.f.read_chars(self.readlen);
+                let mut data: @[char] = @self.f.read_chars(self.readlen);
                 if vec::len(*data) == 0u {
                     if !self.trailing_nl {
                         self.terminating = true;
@@ -294,7 +294,7 @@ fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
             break;
         }
         let m : map::hashmap<str, str> = map::str_hash();
-        let col = 0u;
+        let mut col = 0u;
         let row = result::get(res);
         if row.len() != vec::len(cols) {
             cont; // FIXME: how to flag that we dropped a crazy row?
@@ -342,7 +342,7 @@ mod test {
         let chk = fn@(mk: fn(io::reader) -> rowreader) {
             let f = io::str_reader(testdata);
             let r = mk(f);
-            let i = 0u;
+            let mut i = 0u;
             loop {
                 let res = r.readrow();
                 if result::failure(res) {
@@ -352,7 +352,7 @@ mod test {
                 let expect = expected[i];
 
                 assert(row.len() == vec::len(expect));
-                let j = 0u;
+                let mut j = 0u;
                 while j < row.len() {
                     assert(row.getstr(j) == expect[j]);
                     j += 1u;
@@ -367,7 +367,7 @@ mod test {
                 new_reader_readlen(inp, ',', '"', 2u)
             };
             // test continuations over read buffers
-            let j = 1u;
+            let mut j = 1u;
             while j < str::len(testdata) {
                 chk() { |inp|
                     new_reader_readlen(inp, ',', '"', j)
