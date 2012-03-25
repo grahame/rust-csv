@@ -366,6 +366,10 @@ mod test {
             chk() { |inp|
                 new_reader_readlen(inp, ',', '"', 2u)
             };
+            // test default constructor
+            chk() { |inp|
+                new_reader(inp, ',', '"')
+            };
             // test continuations over read buffers
             let mut j = 1u;
             while j < str::len(testdata) {
