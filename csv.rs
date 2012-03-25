@@ -4,7 +4,7 @@ import std::map;
 import map::hashmap;
 import result;
 
-export rowreader, rowaccess, rowiter,
+export rowreader, rowiter,
        new_reader, new_reader_readlen,
        hashmap_iter, hashmap_iter_full;
 
@@ -21,7 +21,7 @@ type rowreader = {
     quote: char,
     f : io::reader,
     mutable offset : uint,
-    mutable buffers : [@[char]],
+    mutable buffers : [[char]],
     mutable state : state,
     mutable trailing_nl : bool,
     mutable terminating : bool
@@ -33,7 +33,8 @@ type row = {
 
 type bufferdescr = {
     escaped: bool,
-    buffers: [@[char]],
+    sb: uint,
+    eb: uint,
     start: uint,
     end: uint
 };
@@ -44,26 +45,12 @@ enum fieldtype {
 }
 
 iface rowiter {
-    fn readrow() -> result::result<row, str>;
-}
-
-iface rowaccess {
-    fn len() -> uint;
-    fn getchars(uint) -> [char];
-    fn getstr(uint) -> str;
+    fn readrow(&row: [str]) -> bool;
 }
 
 fn new_reader(+f: io::reader, +delim: char, +quote: char) -> rowreader {
     {
-        readlen: 1024u,
-        delim: delim,
-        quote: quote,
-        f: f,
-        mutable offset : 0u,
-        mutable buffers : [],
-        mutable state : fieldstart(false),
-        mutable trailing_nl : false,
-        mutable terminating: false
+        new_reader_readlen(f, delim, quote, 1024u)
     }
 }
 
@@ -81,79 +68,8 @@ fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> r
     }
 }
 
-impl of rowaccess for row {
-    fn len() -> uint {
-        vec::len(self.fields)
-    }
-    fn getchars(field: uint) -> [char] {
-        fn unescape(escaped: [char]) -> [char] {
-            let mut r : [char] = [];
-            vec::reserve(r, vec::len(escaped));
-            let mut in_q = false;
-            for c in escaped { 
-                if in_q { 
-                    assert(c == '"');
-                    in_q = false;
-                } else {
-                    in_q = c == '"';
-                    r += [c];
-                }
-            }
-            ret r;
-        }
-        alt self.fields[field] {
-            emptyfield() { ret []; }
-            bufferfield(desc) {
-                let mut buf = [];
-                { 
-                    let mut i = 0u;
-                    while i < vec::len(desc.buffers) {
-                        let from = if (i == 0u)
-                            { desc.start } else { 0u };
-                        let to = if (i == vec::len(desc.buffers) - 1u)
-                            { desc.end } else { vec::len(*desc.buffers[i]) };
-                        buf += vec::slice(*desc.buffers[i], from, to);
-                        i = i + 1u;
-                    }
-                }
-                if field == self.len() - 1u {
-                    // there may be a trailing \r on the last field; we should strip it
-                    // if so. bodgy here but seems the most efficient place to deal with this
-                    if vec::len(buf) > 0u {
-                        if buf[vec::len(buf)-1u] == '\r' {
-                            buf = vec::slice(buf, 0u, vec::len(buf)-1u);
-                        }
-                    }
-                }
-                if desc.escaped {
-                    buf = unescape(buf);
-                }
-                ret buf;
-            }
-        };
-    }
-    fn getstr(field: uint) -> str {
-        ret str::from_chars(self.getchars(field));
-    }
-    fn getall() -> [str] {
-        let mut a = [];
-        self.map() { |s| 
-            a += [s];
-        }
-        ret a;
-    }
-    fn map(f: fn(s: str)) {
-        let mut i = 0u;
-        let len = self.len();
-        while i < len {
-            f(self.getstr(i));
-            i += 1u;
-        }
-    }
-}
-
 impl of rowiter for rowreader {
-    fn readrow() -> result::result<row, str> {
+    fn readrow(&row: [str]) -> bool {
         fn statestr(state: state) -> str {
             alt state {
                 fieldstart(after_delim) {
@@ -174,28 +90,24 @@ impl of rowiter for rowreader {
             fn new_bufferfield(self: rowreader, escaped: bool, sb: uint, so: uint, eo: uint) -> fieldtype {
                 let mut eb = vec::len(self.buffers) - 1u;
                 let mut sb = sb, so = so, eo = eo;
-                //#debug("sb %u so %u eb %u eo %u", sb, so, eb, eo);
-                //log(debug, vec::map(self.buffers) { |t| str::from_chars(*t) } );
-                //log(debug, vec::map(self.buffers) { |t| vec::len(*t) });
                 if escaped {
                     so += 1u;
-                    if so > vec::len(*self.buffers[sb]) {
+                    if so > vec::len(self.buffers[sb]) {
                         sb += 1u;
-                        so = vec::len(*self.buffers[sb]) - 1u;
+                        so = vec::len(self.buffers[sb]) - 1u;
                     }
                     if eo > 0u {
                         eo -= 1u;
                     } else {
                         eb -= 1u;
-                        eo = vec::len(*self.buffers[eb]) - 1u;
+                        eo = vec::len(self.buffers[eb]) - 1u;
                     }
                 }
-                //#debug("sb %u so %u eb %u eo %u", sb, so, eb, eo);
-                bufferfield({ escaped: escaped, buffers: vec::slice(self.buffers, sb, eb+1u), start: so, end: eo })
+                bufferfield({ escaped: escaped, sb: sb, eb: eb, start: so, end: eo })
             }
             let cbuffer = vec::len(self.buffers) - 1u;
-            let buf: @[char] = self.buffers[cbuffer];
-            while self.offset < vec::len(*buf) {
+            let buf = self.buffers[cbuffer];
+            while self.offset < vec::len(buf) {
                 let coffset = self.offset;
                 let c : char = buf[coffset];
                 #debug("got '%c' | %s", c, statestr(self.state));
@@ -251,55 +163,97 @@ impl of rowiter for rowreader {
             }
             ret false;
         }
-
         self.state = fieldstart(false);
         let mut do_read = vec::len(self.buffers) == 0u;
         let mut fields = [];
 
         while !self.terminating {
             if do_read {
-                let mut data: @[char] = @self.f.read_chars(self.readlen);
-                if vec::len(*data) == 0u {
+                let mut data = self.f.read_chars(self.readlen);
+                //log(error, ("aa", str::from_chars(data)));
+                if vec::len(data) == 0u {
                     if !self.trailing_nl {
                         self.terminating = true;
-                        data = @['\n'];
+                        data = ['\n'];
                     } else {
-                        ret result::err("EOF");
+                        ret false;
                     }
-                } else {
-                    self.trailing_nl = data[vec::len(*data) - 1u] == '\n';
                 }
+                // this is horrible, but it avoids the whole parser needing 
+                // to know about \r.
+                data = vec::filter(data) { |c| c != '\r' };
+                let data_len = vec::len(data);
+                if data_len == 0u {
+                    cont;
+                }
+                //log(error, ("here", str::from_chars(data)));
+                self.trailing_nl = data[data_len - 1u] == '\n';
                 self.buffers += [data];
                 self.offset = 0u;
             }
 
             if row_from_buf(self, fields) {
-                let r: row = { fields: fields };
-                fields = [];
+                let l = vec::len(fields);
+                vec::reserve(row, l);
+                row = vec::map(fields) { |field| 
+                    fn unescape(escaped: [char]) -> [char] {
+                        let mut r : [char] = [];
+                        vec::reserve(r, vec::len(escaped));
+                        let mut in_q = false;
+                        for c in escaped { 
+                            if in_q { 
+                                assert(c == '"');
+                                in_q = false;
+                            } else {
+                                in_q = c == '"';
+                                r += [c];
+                            }
+                        }
+                        ret r;
+                    }
+                    alt field {
+                        emptyfield() { ret ""; }
+                        bufferfield(desc) {
+                            let mut buf = [];
+                            { 
+                                let mut i = desc.sb;
+                                while i <= desc.eb {
+                                    let from = if (i == desc.sb)
+                                        { desc.start } else { 0u };
+                                    let to = if (i == desc.eb)
+                                        { desc.end } else { vec::len(self.buffers[i]) };
+                                    buf += vec::slice(self.buffers[i], from, to);
+                                    i = i + 1u;
+                                }
+                            }
+                            if desc.escaped {
+                                buf = unescape(buf);
+                            }
+                            ret str::from_chars(buf);
+                        }
+                    };
+                };
                 if vec::len(self.buffers) > 1u {
                     self.buffers = vec::slice(self.buffers, vec::len(self.buffers) - 1u, vec::len(self.buffers));
                 }
-                ret result::ok(r);
+                fields = [];
+                ret true;
             }
             do_read = true;
         }
-        ret result::err("unreachable");
+        ret false;
     }
 }
 
 fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
-    loop {
-        let res = r.readrow();
-        if result::failure(res) {
-            break;
-        }
+    let mut fields : [str] = [];
+    while r.readrow(fields) {
         let m : map::hashmap<str, str> = map::str_hash();
         let mut col = 0u;
-        let row = result::get(res);
-        if row.len() != vec::len(cols) {
+        if vec::len(fields) != vec::len(cols) {
             cont; // FIXME: how to flag that we dropped a crazy row?
         }
-        result::get(res).map() { |s|
+        vec::iter(fields) { |s|
             m.insert(cols[col], s);
             col += 1u;
         };
@@ -310,12 +264,9 @@ fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
 // reads the first row as a header, to derive keys for a hashmap
 // emitted for each subsequent row
 fn hashmap_iter(r: rowreader, f: fn(map::hashmap<str, str>)) {
-    let res = r.readrow();
-    alt res {
-        result::ok(row) {
-            hashmap_iter_cols(r, result::get(res).getall(), f);
-        }
-        result::err(_) { }
+    let mut row: [str] = [];
+    if r.readrow(row) {
+        hashmap_iter_cols(r, row, f);
     }
 }
 
@@ -323,57 +274,52 @@ fn hashmap_iter(r: rowreader, f: fn(map::hashmap<str, str>)) {
 // cleaning up headers; also allows verification that heads are 
 // satisfactory
 fn hashmap_iter_full(r: rowreader, hmap: fn(&&h: str) -> str, hver: fn(cols: [str]) -> bool, f: fn(map::hashmap<str, str>)) {
-    let res = r.readrow();
-    alt res {
-        result::ok(row) {
-            let cols : [str] = vec::map(result::get(res).getall(), hmap);
-            if !hver(cols) {
-                ret;
-            }
-            hashmap_iter_cols(r, cols, f);
+    let mut row: [str] = [];
+    if r.readrow(row) {
+        let cols : [str] = vec::map(row, hmap);
+        if !hver(cols) {
+            ret;
         }
-        result::err(_) { }
+        hashmap_iter_cols(r, cols, f);
     }
 }
 
 #[cfg(test)]
 mod test {
     fn rowmatch(testdata: str, expected: [[str]]) {
-        let chk = fn@(mk: fn(io::reader) -> rowreader) {
-            let f = io::str_reader(testdata);
+        let chk = fn@(s: str, mk: fn(io::reader) -> rowreader) {
+            let f = io::str_reader(s);
             let r = mk(f);
             let mut i = 0u;
             loop {
-                let res = r.readrow();
-                if result::failure(res) {
+                let mut row: [str] = [];
+                if !r.readrow(row) {
                     break;
                 }
-                let row = result::get(res);
                 let expect = expected[i];
-
-                assert(row.len() == vec::len(expect));
+                assert(vec::len(row) == vec::len(expect));
                 let mut j = 0u;
                 while j < row.len() {
-                    assert(row.getstr(j) == expect[j]);
+                    assert(row[j] == expect[j]);
                     j += 1u;
                 }
                 i += 1u;
             }
             assert(i == vec::len(expected));
         };
-        let runchecks = fn@(testdata: str) {
+        let runchecks = fn@(s: str) {
             // test default reader params
-            chk() { |inp|
+            chk(s) { |inp|
                 new_reader_readlen(inp, ',', '"', 2u)
             };
             // test default constructor
-            chk() { |inp|
+            chk(s) { |inp|
                 new_reader(inp, ',', '"')
             };
             // test continuations over read buffers
             let mut j = 1u;
-            while j < str::len(testdata) {
-                chk() { |inp|
+            while j < str::len(s) {
+                chk(s) { |inp|
                     new_reader_readlen(inp, ',', '"', j)
                 };
                 j += 1u;
@@ -383,8 +329,11 @@ mod test {
         // so we can test trailing newline case, testdata
         // must not end in \n - leave off the last newline
         runchecks(testdata);
-        runchecks(testdata+"\n");
         runchecks(str::replace(testdata, "\n", "\r\n"));
+        if !str::ends_with(testdata, "\n") {
+            runchecks(testdata+"\n");
+            runchecks(str::replace(testdata+"\n", "\n", "\r\n"));
+        }
     }
 
     #[test]
