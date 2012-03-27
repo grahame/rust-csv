@@ -249,8 +249,9 @@ fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
     let mut fields : [str] = [];
     // can reuse, we're just shoving new vals in same cols..
     let m : map::hashmap<str, str> = map::str_hash();
+    let ncols = vec::len(cols);
     while r.readrow(fields) {
-        if vec::len(fields) != vec::len(cols) {
+        if vec::len(fields) != ncols {
             cont; // FIXME: how to flag that we dropped a crazy row?
         }
         let mut col = 0u;
