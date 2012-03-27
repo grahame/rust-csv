@@ -247,12 +247,13 @@ impl of rowiter for rowreader {
 
 fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
     let mut fields : [str] = [];
+    // can reuse, we're just shoving new vals in same cols..
+    let m : map::hashmap<str, str> = map::str_hash();
     while r.readrow(fields) {
-        let m : map::hashmap<str, str> = map::str_hash();
-        let mut col = 0u;
         if vec::len(fields) != vec::len(cols) {
             cont; // FIXME: how to flag that we dropped a crazy row?
         }
+        let mut col = 0u;
         vec::iter(fields) { |s|
             m.insert(cols[col], s);
             col += 1u;
