@@ -20,11 +20,11 @@ type rowreader = {
     delim: char,
     quote: char,
     f : io::reader,
-    mutable offset : uint,
-    mutable buffers : [[char]],
-    mutable state : state,
-    mutable trailing_nl : bool,
-    mutable terminating : bool
+    mut offset : uint,
+    mut buffers : [[char]],
+    mut state : state,
+    mut trailing_nl : bool,
+    mut terminating : bool
 };
 
 type row = {
@@ -60,16 +60,31 @@ fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> r
         delim: delim,
         quote: quote,
         f: f,
-        mutable offset : 0u,
-        mutable buffers : [],
-        mutable state : fieldstart(false),
-        mutable trailing_nl : false,
-        mutable terminating: false
+        mut offset : 0u,
+        mut buffers : [],
+        mut state : fieldstart(false),
+        mut trailing_nl : false,
+        mut terminating: false
     }
 }
 
 impl of rowiter for rowreader {
     fn readrow(&row: [str]) -> bool {
+        fn unescape(escaped: [char]) -> [char] {
+            let mut r : [char] = [];
+            vec::reserve(r, vec::len(escaped));
+            let mut in_q = false;
+            for c in escaped { 
+                if in_q { 
+                    assert(c == '"');
+                    in_q = false;
+                } else {
+                    in_q = c == '"';
+                    r += [c];
+                }
+            }
+            ret r;
+        }
         fn statestr(state: state) -> str {
             alt state {
                 fieldstart(after_delim) {
@@ -196,23 +211,8 @@ impl of rowiter for rowreader {
                 let l = vec::len(fields);
                 vec::reserve(row, l);
                 row = vec::map(fields) { |field| 
-                    fn unescape(escaped: [char]) -> [char] {
-                        let mut r : [char] = [];
-                        vec::reserve(r, vec::len(escaped));
-                        let mut in_q = false;
-                        for c in escaped { 
-                            if in_q { 
-                                assert(c == '"');
-                                in_q = false;
-                            } else {
-                                in_q = c == '"';
-                                r += [c];
-                            }
-                        }
-                        ret r;
-                    }
                     alt field {
-                        emptyfield() { ret ""; }
+                        emptyfield() { "" }
                         bufferfield(desc) {
                             let mut buf = [];
                             { 
@@ -229,9 +229,9 @@ impl of rowiter for rowreader {
                             if desc.escaped {
                                 buf = unescape(buf);
                             }
-                            ret str::from_chars(buf);
+                            str::from_chars(buf)
                         }
-                    };
+                    }
                 };
                 if vec::len(self.buffers) > 1u {
                     self.buffers = vec::slice(self.buffers, vec::len(self.buffers) - 1u, vec::len(self.buffers));
