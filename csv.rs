@@ -27,10 +27,6 @@ type rowreader = {
     mut terminating : bool
 };
 
-type row = {
-    fields : [ fieldtype ]
-};
-
 type bufferdescr = {
     escaped: bool,
     sb: uint,
@@ -68,40 +64,65 @@ fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> r
     }
 }
 
+fn statestr(state: state) -> str {
+    alt state {
+        fieldstart(after_delim) {
+            #fmt("fieldstart : after_delim %b", after_delim)
+        }
+        infield(b,o) { 
+            #fmt("field : %u %u", b, o)
+        }
+        inquotedfield(b, o) {
+            #fmt("inquotedfield : %u %u", b, o)
+        }
+        inquote(b, o) {
+            #fmt("inquote : %u %u", b, o)
+        }
+    }
+}
+
+fn unescape(escaped: [char]) -> [char] {
+    let mut r : [char] = [];
+    vec::reserve(r, vec::len(escaped));
+    let mut in_q = false;
+    for c in escaped { 
+        if in_q { 
+            assert(c == '"');
+            in_q = false;
+        } else {
+            in_q = c == '"';
+            r += [c];
+        }
+    }
+    ret r;
+}
+
 impl of rowiter for rowreader {
     fn readrow(&row: [str]) -> bool {
-        fn unescape(escaped: [char]) -> [char] {
-            let mut r : [char] = [];
-            vec::reserve(r, vec::len(escaped));
-            let mut in_q = false;
-            for c in escaped { 
-                if in_q { 
-                    assert(c == '"');
-                    in_q = false;
-                } else {
-                    in_q = c == '"';
-                    r += [c];
+        fn row_from_buf(self: rowreader, &fields: [str]) -> bool {
+            fn decode(buffers: [[char]], field: fieldtype) -> str {
+                alt field {
+                    emptyfield() { "" }
+                    bufferfield(desc) {
+                        let mut buf = [];
+                        { 
+                            let mut i = desc.sb;
+                            while i <= desc.eb {
+                                let from = if (i == desc.sb)
+                                    { desc.start } else { 0u };
+                                let to = if (i == desc.eb)
+                                    { desc.end } else { vec::len(buffers[i]) };
+                                buf += vec::slice(buffers[i], from, to);
+                                i = i + 1u;
+                            }
+                        }
+                        if desc.escaped {
+                            buf = unescape(buf);
+                        }
+                        str::from_chars(buf)
+                    }
                 }
             }
-            ret r;
-        }
-        fn statestr(state: state) -> str {
-            alt state {
-                fieldstart(after_delim) {
-                    #fmt("fieldstart : after_delim %b", after_delim)
-                }
-                infield(b,o) { 
-                    #fmt("field : %u %u", b, o)
-                }
-                inquotedfield(b, o) {
-                    #fmt("inquotedfield : %u %u", b, o)
-                }
-                inquote(b, o) {
-                    #fmt("inquote : %u %u", b, o)
-                }
-            }
-        }
-        fn row_from_buf(self: rowreader, &fields: [fieldtype]) -> bool {
             fn new_bufferfield(self: rowreader, escaped: bool, sb: uint, so: uint, eo: uint) -> fieldtype {
                 let mut eb = vec::len(self.buffers) - 1u;
                 let mut sb = sb, so = so, eo = eo;
@@ -134,12 +155,12 @@ impl of rowiter for rowreader {
                             self.state = inquotedfield(cbuffer, coffset);
                         } else if c == '\n' {
                             if after_delim {
-                                fields += [emptyfield];
+                                fields += [decode(self.buffers, emptyfield)];
                             }
                             ret true;
                         } else if c == self.delim {
                             self.state = fieldstart(true);
-                            fields += [emptyfield];
+                            fields += [decode(self.buffers, emptyfield)];
                         } else {
                             self.state = infield(cbuffer, coffset);
                         }
@@ -147,11 +168,11 @@ impl of rowiter for rowreader {
                     infield(b,o) {
                         #debug("field : %u %u", b, o);
                         if c == '\n' {
-                            fields += [new_bufferfield(self, false, b, o, coffset)];
+                            fields += [decode(self.buffers, new_bufferfield(self, false, b, o, coffset))];
                             ret true;
                         } else if c == self.delim {
                             self.state = fieldstart(true);
-                            fields += [new_bufferfield(self, false, b, o, coffset)];
+                            fields += [decode(self.buffers, new_bufferfield(self, false, b, o, coffset))];
                         }
                     }
                     inquotedfield(b, o) {
@@ -163,13 +184,13 @@ impl of rowiter for rowreader {
                     inquote(b, o) {
                         #debug("inquote : %u %u", b, o);
                         if c == '\n' {
-                            fields += [new_bufferfield(self, true, b, o, coffset)];
+                            fields += [decode(self.buffers, new_bufferfield(self, true, b, o, coffset))];
                             ret true;
                         } else if c == self.quote {
                             self.state = inquotedfield(b, o);
                         } else if c == self.delim {
                             self.state = fieldstart(true);
-                            fields += [new_bufferfield(self, true, b, o, coffset)];
+                            fields += [decode(self.buffers, new_bufferfield(self, true, b, o, coffset))];
                         }
                         // swallow odd chars, eg. space between field and "
                     }
@@ -180,7 +201,6 @@ impl of rowiter for rowreader {
         }
         self.state = fieldstart(false);
         let mut do_read = vec::len(self.buffers) == 0u;
-        let mut fields = [];
 
         while !self.terminating {
             if do_read {
@@ -201,42 +221,15 @@ impl of rowiter for rowreader {
                 if data_len == 0u {
                     cont;
                 }
-                //log(error, ("here", str::from_chars(data)));
                 self.trailing_nl = data[data_len - 1u] == '\n';
                 self.buffers += [data];
                 self.offset = 0u;
             }
 
-            if row_from_buf(self, fields) {
-                let l = vec::len(fields);
-                vec::reserve(row, l);
-                row = vec::map(fields) { |field| 
-                    alt field {
-                        emptyfield() { "" }
-                        bufferfield(desc) {
-                            let mut buf = [];
-                            { 
-                                let mut i = desc.sb;
-                                while i <= desc.eb {
-                                    let from = if (i == desc.sb)
-                                        { desc.start } else { 0u };
-                                    let to = if (i == desc.eb)
-                                        { desc.end } else { vec::len(self.buffers[i]) };
-                                    buf += vec::slice(self.buffers[i], from, to);
-                                    i = i + 1u;
-                                }
-                            }
-                            if desc.escaped {
-                                buf = unescape(buf);
-                            }
-                            str::from_chars(buf)
-                        }
-                    }
-                };
+            if row_from_buf(self, row) {
                 if vec::len(self.buffers) > 1u {
                     self.buffers = vec::slice(self.buffers, vec::len(self.buffers) - 1u, vec::len(self.buffers));
                 }
-                fields = [];
                 ret true;
             }
             do_read = true;
@@ -339,49 +332,49 @@ mod test {
     }
 
     #[test]
-    fn test_simple() {
+    fn simple() {
         rowmatch("a,b,c,d\n1,2,3,4",
                  [["a", "b", "c", "d"], ["1", "2", "3", "4"]]);
     }
 
     #[test]
-    fn test_trailing_comma() {
+    fn trailing_comma() {
         rowmatch("a,b,c,d\n1,2,3,4,",
                  [["a", "b", "c", "d"], ["1", "2", "3", "4", ""]]);
     }
 
     #[test]
-    fn test_leading_comma() {
+    fn leading_comma() {
         rowmatch("a,b,c,d\n,1,2,3,4",
                  [["a", "b", "c", "d"], ["", "1", "2", "3", "4"]]);
     }
 
     #[test]
-    fn test_quote_simple() {
+    fn quote_simple() {
         rowmatch("\"Hello\",\"There\"\na,b,\"c\",d",
                  [["Hello", "There"], ["a", "b", "c", "d"]]);
     }
 
     #[test]
-    fn test_quote_nested() {
+    fn quote_nested() {
         rowmatch("\"Hello\",\"There is a \"\"fly\"\" in my soup\"\na,b,\"c\",d",
                  [["Hello", "There is a \"fly\" in my soup"], ["a", "b", "c", "d"]]);
     }
 
     #[test]
-    fn test_quote_with_comma() {
+    fn quote_with_comma() {
         rowmatch("\"1,2\"",
                  [["1,2"]])
     }
 
     #[test]
-    fn test_quote_with_other_comma() {
+    fn quote_with_other_comma() {
         rowmatch("1,2,3,\"a,b,c\"",
                  [["1", "2", "3", "a,b,c"]])
     }
 
     #[test]
-    fn test_blank_line() {
+    fn blank_line() {
         rowmatch("\n\n", [[], []]);
     }
 }
