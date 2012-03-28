@@ -22,6 +22,7 @@ type rowreader = {
     f : io::reader,
     mut offset : uint,
     mut buffers : [[char]],
+    mut bufferlens: [uint],
     mut state : state,
     mut trailing_nl : bool,
     mut terminating : bool
@@ -58,6 +59,7 @@ fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> r
         f: f,
         mut offset : 0u,
         mut buffers : [],
+        mut bufferlens: [],
         mut state : fieldstart(false),
         mut trailing_nl : false,
         mut terminating: false
@@ -98,6 +100,7 @@ fn unescape(escaped: [char]) -> [char] {
 }
 
 impl of rowiter for rowreader {
+    #[inline]
     fn readrow(&row: [str]) -> bool {
         fn row_from_buf(self: rowreader, &fields: [str]) -> bool {
             fn decode(buffers: [[char]], field: fieldtype) -> str {
@@ -105,16 +108,19 @@ impl of rowiter for rowreader {
                     emptyfield() { "" }
                     bufferfield(desc) {
                         let mut buf = [];
-                        { 
-                            let mut i = desc.sb;
-                            while i <= desc.eb {
-                                let from = if (i == desc.sb)
-                                    { desc.start } else { 0u };
-                                let to = if (i == desc.eb)
-                                    { desc.end } else { vec::len(buffers[i]) };
-                                buf += vec::slice(buffers[i], from, to);
-                                i = i + 1u;
+                        vec::reserve(buf, 256u);
+                        let mut i = desc.sb;
+                        while i <= desc.eb {
+                            let from = if (i == desc.sb)
+                                { desc.start } else { 0u };
+                            let to = if (i == desc.eb)
+                                { desc.end } else { vec::len(buffers[i]) };
+                            let mut j = from;
+                            while j < to {
+                                buf += [buffers[i][j]];
+                                j += 1u;
                             }
+                            i = i + 1u;
                         }
                         if desc.escaped {
                             buf = unescape(buf);
@@ -123,20 +129,21 @@ impl of rowiter for rowreader {
                     }
                 }
             }
+            #[inline]
             fn new_bufferfield(self: rowreader, escaped: bool, sb: uint, so: uint, eo: uint) -> fieldtype {
                 let mut eb = vec::len(self.buffers) - 1u;
                 let mut sb = sb, so = so, eo = eo;
                 if escaped {
                     so += 1u;
-                    if so > vec::len(self.buffers[sb]) {
+                    if so > self.bufferlens[sb] {
                         sb += 1u;
-                        so = vec::len(self.buffers[sb]) - 1u;
+                        so = self.bufferlens[sb] - 1u;
                     }
                     if eo > 0u {
                         eo -= 1u;
                     } else {
                         eb -= 1u;
-                        eo = vec::len(self.buffers[eb]) - 1u;
+                        eo = self.bufferlens[eb] - 1u;
                     }
                 }
                 bufferfield({ escaped: escaped, sb: sb, eb: eb, start: so, end: eo })
@@ -201,11 +208,10 @@ impl of rowiter for rowreader {
         }
         self.state = fieldstart(false);
         let mut do_read = vec::len(self.buffers) == 0u;
-
+        row = [];
         while !self.terminating {
             if do_read {
                 let mut data = self.f.read_chars(self.readlen);
-                //log(error, ("aa", str::from_chars(data)));
                 if vec::len(data) == 0u {
                     if !self.trailing_nl {
                         self.terminating = true;
@@ -223,12 +229,15 @@ impl of rowiter for rowreader {
                 }
                 self.trailing_nl = data[data_len - 1u] == '\n';
                 self.buffers += [data];
+                self.bufferlens += [data_len];
                 self.offset = 0u;
             }
 
             if row_from_buf(self, row) {
-                if vec::len(self.buffers) > 1u {
-                    self.buffers = vec::slice(self.buffers, vec::len(self.buffers) - 1u, vec::len(self.buffers));
+                let buflen = vec::len(self.buffers);
+                if buflen > 1u {
+                    self.buffers = [self.buffers[buflen-1u]];
+                    self.bufferlens = [self.bufferlens[buflen-1u]];
                 }
                 ret true;
             }
@@ -244,6 +253,7 @@ fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
     let m : map::hashmap<str, str> = map::str_hash();
     let ncols = vec::len(cols);
     while r.readrow(fields) {
+        log(error, fields);
         if vec::len(fields) != ncols {
             cont; // FIXME: how to flag that we dropped a crazy row?
         }
@@ -286,8 +296,8 @@ mod test {
             let f = io::str_reader(s);
             let r = mk(f);
             let mut i = 0u;
+            let mut row: [str] = [];
             loop {
-                let mut row: [str] = [];
                 if !r.readrow(row) {
                     break;
                 }
