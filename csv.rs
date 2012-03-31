@@ -5,8 +5,7 @@ import map::hashmap;
 import result;
 
 export rowreader, rowiter,
-       new_reader, new_reader_readlen,
-       hashmap_iter, hashmap_iter_full;
+       new_reader, new_reader_readlen;
 
 enum state {
     fieldstart(bool),
@@ -22,7 +21,6 @@ type rowreader = {
     f : io::reader,
     mut offset : uint,
     mut buffers : [[char]],
-    mut bufferlens: [uint],
     mut state : state,
     mut trailing_nl : bool,
     mut terminating : bool
@@ -59,7 +57,6 @@ fn new_reader_readlen(+f: io::reader, +delim: char, +quote: char, rl: uint) -> r
         f: f,
         mut offset : 0u,
         mut buffers : [],
-        mut bufferlens: [],
         mut state : fieldstart(false),
         mut trailing_nl : false,
         mut terminating: false
@@ -135,15 +132,15 @@ impl of rowiter for rowreader {
                 let mut sb = sb, so = so, eo = eo;
                 if escaped {
                     so += 1u;
-                    if so > self.bufferlens[sb] {
+                    if so > vec::len(self.buffers[sb]) {
                         sb += 1u;
-                        so = self.bufferlens[sb] - 1u;
+                        so = vec::len(self.buffers[sb]) - 1u;
                     }
                     if eo > 0u {
                         eo -= 1u;
                     } else {
                         eb -= 1u;
-                        eo = self.bufferlens[eb] - 1u;
+                        eo = vec::len(self.buffers[eb]) - 1u;
                     }
                 }
                 bufferfield({ escaped: escaped, sb: sb, eb: eb, start: so, end: eo })
@@ -229,7 +226,6 @@ impl of rowiter for rowreader {
                 }
                 self.trailing_nl = data[data_len - 1u] == '\n';
                 self.buffers += [data];
-                self.bufferlens += [data_len];
                 self.offset = 0u;
             }
 
@@ -237,55 +233,12 @@ impl of rowiter for rowreader {
                 let buflen = vec::len(self.buffers);
                 if buflen > 1u {
                     self.buffers = [self.buffers[buflen-1u]];
-                    self.bufferlens = [self.bufferlens[buflen-1u]];
                 }
                 ret true;
             }
             do_read = true;
         }
         ret false;
-    }
-}
-
-fn hashmap_iter_cols(r: rowreader, cols: [str], f: fn(map::hashmap<str, str>)) {
-    let mut fields : [str] = [];
-    // can reuse, we're just shoving new vals in same cols..
-    let m : map::hashmap<str, str> = map::str_hash();
-    let ncols = vec::len(cols);
-    while r.readrow(fields) {
-        log(error, fields);
-        if vec::len(fields) != ncols {
-            cont; // FIXME: how to flag that we dropped a crazy row?
-        }
-        let mut col = 0u;
-        vec::iter(fields) { |s|
-            m.insert(cols[col], s);
-            col += 1u;
-        };
-        f(m);
-    }
-}
-
-// reads the first row as a header, to derive keys for a hashmap
-// emitted for each subsequent row
-fn hashmap_iter(r: rowreader, f: fn(map::hashmap<str, str>)) {
-    let mut row: [str] = [];
-    if r.readrow(row) {
-        hashmap_iter_cols(r, row, f);
-    }
-}
-
-// as hashmap_iter, but first apply 'hc' to each header; allows
-// cleaning up headers; also allows verification that heads are 
-// satisfactory
-fn hashmap_iter_full(r: rowreader, hmap: fn(&&h: str) -> str, hver: fn(cols: [str]) -> bool, f: fn(map::hashmap<str, str>)) {
-    let mut row: [str] = [];
-    if r.readrow(row) {
-        let cols : [str] = vec::map(row, hmap);
-        if !hver(cols) {
-            ret;
-        }
-        hashmap_iter_cols(r, cols, f);
     }
 }
 
