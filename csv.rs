@@ -85,7 +85,7 @@ fn unescape(escaped: [char], quote: char) -> [char] {
     let mut r : [char] = [];
     vec::reserve(r, vec::len(escaped));
     let mut in_q = false;
-    for c in escaped { 
+    for vec::each(escaped) { |c|
         if in_q { 
             assert(c == quote);
             in_q = false;
