@@ -1,3 +1,6 @@
 *.dylib
 *DSYM
 .*swp
+*.stamp
+csv
+examples/bench
