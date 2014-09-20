@@ -1,3 +1,9 @@
+## Note
+
+This is for a truly ancient version of Rust. I may come back and
+port to modern Rust (or would eagerly take a pull request doing
+so). Right now, this isn't in a working state.
+
 CSV: parser for RFC 4180 CSV files
 
 This package implements a parser for the RFC 4180 CSV file format.
